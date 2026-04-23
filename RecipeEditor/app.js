@@ -106,10 +106,9 @@ function renderRecipe(recipe, data) {
   main.innerHTML = `
     <div class="recipe-view">
       <div class="recipe-toolbar">
-        <span class="recipe-name-heading" id="recipe-name-heading">${esc(recipe.name)}</span>
+        <span class="recipe-name-heading" id="recipe-name-heading" onclick="startRename()" title="Click to rename">${esc(recipe.name)}</span>
         <span class="step-meta">Steps ${first}–${last} &nbsp;·&nbsp; ${rangeSteps.length} step${rangeSteps.length !== 1 ? "s" : ""}</span>
         <span class="save-status" id="save-status"></span>
-        <button class="btn-ghost" id="btn-rename" onclick="startRename()">Rename</button>
         <button class="btn-danger" id="btn-delete" onclick="deleteRecipe()">Delete</button>
         <button class="btn-save" id="btn-save" onclick="saveRecipe()">Save</button>
       </div>
@@ -149,12 +148,12 @@ function renderTableBody(steps, cols) {
                style="accent-color:var(--accent);cursor:pointer;"
                onchange="updateStep(${idx},'SEQ_Enable',this.checked?'1':'0',this)">
       </td>
-      ${cols.map(p => renderCell(p, s.values[p] ?? "", idx)).join("")}
+      ${cols.map(p => renderCell(p, s.values[p] ?? "", idx, s)).join("")}
     </tr>`;
   }).join("");
 }
 
-function renderCell(param, value, idx) {
+function renderCell(param, value, idx, step) {
   if (param === "SEQ_RateReference") {
     return `<td class="cell-check">
       <input type="checkbox" ${value === "1" ? "checked" : ""}
@@ -181,9 +180,15 @@ function renderCell(param, value, idx) {
                   min="1" max="5" step="0.1"
                   onchange="updateStep(${idx},'${param}',this.value)"></td>`;
   }
-  if (param === "SEQ_StepTime" || param === "SEQ_Rounds") {
+  if (param === "SEQ_StepTime") {
     return `<td><input type="number" class="cell-input" value="${esc(value)}"
                   min="0" step="1"
+                  onchange="updateStep(${idx},'${param}',this.value)"></td>`;
+  }
+  if (param === "SEQ_Rounds") {
+    const disabled = (step?.values["SEQ_StepType"] ?? "") !== "2" ? "disabled" : "";
+    return `<td><input type="number" class="cell-input wide rounds-input" value="${esc(value)}"
+                  min="0" step="1" ${disabled}
                   onchange="updateStep(${idx},'${param}',this.value)"></td>`;
   }
   const cls = cellClass(param, value);
@@ -213,6 +218,13 @@ function updateStep(idx, param, value, el) {
   // Re-colour select after change
   if (el && el.tagName === "SELECT") {
     el.dataset.val = value;
+  }
+
+  // Enable/disable Rounds input when Type changes
+  if (param === "SEQ_StepType" && el) {
+    const row = el.closest("tr");
+    const roundsInput = row?.querySelector(".rounds-input");
+    if (roundsInput) roundsInput.disabled = value !== "2";
   }
 }
 
@@ -266,10 +278,9 @@ function esc(s) {
 function startRename() {
   const main    = document.getElementById("main");
   const heading = document.getElementById("recipe-name-heading");
-  const btnRen  = document.getElementById("btn-rename");
   const btnDel  = document.getElementById("btn-delete");
   const btnSave = document.getElementById("btn-save");
-  if (!main._recipe) return;
+  if (!main._recipe || !heading) return;
 
   const current = main._recipe.seq_name;
   const input = document.createElement("input");
@@ -279,44 +290,47 @@ function startRename() {
   input.maxLength = 200;
 
   heading.replaceWith(input);
-  btnRen.textContent = "Save Name";
-  btnRen.onclick = () => commitRename(input, btnRen, btnDel, btnSave);
   btnDel.style.display = "none";
   btnSave.disabled = true;
   input.focus();
   input.select();
 
   input.addEventListener("keydown", e => {
-    if (e.key === "Enter") commitRename(input, btnRen, btnDel, btnSave);
-    if (e.key === "Escape") cancelRename(input, btnRen, btnDel, btnSave, current);
+    if (e.key === "Enter") commitRename(input, btnDel, btnSave);
+    if (e.key === "Escape") cancelRename(input, btnDel, btnSave, current);
   });
+  input.addEventListener("blur", () => commitRename(input, btnDel, btnSave));
 }
 
-function cancelRename(input, btnRen, btnDel, btnSave, original) {
+function cancelRename(input, btnDel, btnSave, original) {
   const span = document.createElement("span");
   span.id = "recipe-name-heading";
   span.className = "recipe-name-heading";
+  span.title = "Click to rename";
   span.textContent = original;
+  span.onclick = startRename;
   input.replaceWith(span);
-  btnRen.textContent = "Rename";
-  btnRen.onclick = startRename;
   btnDel.style.display = "";
   btnSave.disabled = false;
 }
 
-async function commitRename(input, btnRen, btnDel, btnSave) {
+async function commitRename(input, btnDel, btnSave) {
+  // Guard against blur firing after Enter already committed
+  if (!input.isConnected) return;
+
   const main    = document.getElementById("main");
   const status  = document.getElementById("save-status");
   const newName = input.value.trim();
   const oldName = main._recipe.seq_name;
-  if (!newName) return;
-  if (newName === oldName) {
-    cancelRename(input, btnRen, btnDel, btnSave, oldName);
+
+  if (!newName || newName === oldName) {
+    cancelRename(input, btnDel, btnSave, oldName);
     return;
   }
 
-  btnRen.disabled = true;
-  btnRen.textContent = "Saving…";
+  // Detach blur so it doesn't fire again during the async call
+  input.onblur = null;
+  input.disabled = true;
 
   try {
     const r = await fetch(
@@ -326,16 +340,11 @@ async function commitRename(input, btnRen, btnDel, btnSave) {
     );
     const data = await r.json();
     if (data.ok) {
-      // Update in-memory recipe object
       main._recipe.seq_name = newName;
       main._recipe.name     = newName;
-      // Update sidebar
       await loadRecipes();
-      // Restore heading with new name
-      cancelRename(input, btnRen, btnDel, btnSave, newName);
-      // Highlight the renamed entry
-      const items = document.querySelectorAll(".recipe-item");
-      items.forEach(el => {
+      cancelRename(input, btnDel, btnSave, newName);
+      document.querySelectorAll(".recipe-item").forEach(el => {
         if (el.querySelector(".rname")?.textContent === newName)
           el.classList.add("active");
       });
@@ -345,14 +354,12 @@ async function commitRename(input, btnRen, btnDel, btnSave) {
     } else {
       status.textContent = data.error || "Rename failed";
       status.className = "save-status error";
-      btnRen.disabled = false;
-      btnRen.textContent = "Save Name";
+      cancelRename(input, btnDel, btnSave, oldName);
     }
   } catch (e) {
     status.textContent = "Network error";
     status.className = "save-status error";
-    btnRen.disabled = false;
-    btnRen.textContent = "Save Name";
+    cancelRename(input, btnDel, btnSave, oldName);
   }
 }
 

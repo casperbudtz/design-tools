@@ -1,10 +1,10 @@
 __pycache__/
 *.pyc
 *.log
-RecipeEditor/recipe/*.bak
 RecipeEditor/recipe/*.tmp
 RecipeEditor/recipe/*.deleted
 RecipeEditor/.~lock.*
 RecipeEditor/recipe/.~lock.*
 RecipeEditor/import_settings.json
+RecipeEditor/recipe/recipe-editor-backups/
 OptilayerIndexer/index.json

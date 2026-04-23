@@ -160,6 +160,11 @@ def _optilayer_build_index_locked():
 
 _DEFAULT_RECIPE_DIR  = str(BASE / "RecipeEditor" / "recipe")
 IMPORT_SETTINGS      = BASE / "RecipeEditor" / "import_settings.json"
+BACKUP_MAX_AGE_DAYS  = 30
+
+
+def _backup_dir() -> Path:
+    return _get_recipe_dir() / "recipe-editor-backups"
 
 # Serialize all recipe-file writes. HTTPServer is single-threaded today, but
 # this also protects against re-entrant calls from shared helpers.
@@ -167,15 +172,33 @@ _RECIPE_WRITE_LOCK = threading.Lock()
 
 
 def _timestamped_backup(path: Path) -> None:
-    """Copy `path` to `path.<ISO-timestamp>.bak` before we modify it.
+    """Copy `path` into _backup_dir() as `<filename>.<ISO-timestamp>.bak`.
 
-    Previous versions used a single `.bak` file, which got overwritten on the
-    next save — losing the prior backup. Timestamped names keep every save.
+    Backups older than BACKUP_MAX_AGE_DAYS are pruned afterward. The backup
+    subdirectory lives inside the recipe dir so it is accessible wherever
+    that dir is mounted (local or SMB share).
     """
     if not path.exists():
         return
+    bd = _backup_dir()
+    bd.mkdir(exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-    shutil.copy2(str(path), f"{path}.{stamp}.bak")
+    shutil.copy2(str(path), bd / f"{path.name}.{stamp}.bak")
+    _prune_backups()
+
+
+def _prune_backups() -> None:
+    """Delete backup files older than BACKUP_MAX_AGE_DAYS."""
+    bd = _backup_dir()
+    if not bd.exists():
+        return
+    cutoff = datetime.now().timestamp() - BACKUP_MAX_AGE_DAYS * 86400
+    for f in bd.glob("*.bak"):
+        try:
+            if f.stat().st_mtime < cutoff:
+                f.unlink()
+        except OSError:
+            pass
 
 # Known materials and their default step names (used when no settings file exists)
 _DEFAULT_MATERIAL_STEPS = {
@@ -454,7 +477,7 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
                 "SEQ_MaxTime":         max_time,
                 "SEQ_StepType":        step_type,
                 "SEQ_StepTime":        "0",
-                "SEQ_Rounds":          "0",
+                "SEQ_Rounds":          str(rounds),
                 "SEQ_Values":          rc_val,
                 "SEQ_QWOT":            d.get("optical_thickness", "0"),
                 "SEQ_Wavelength":      d.get("wavelength", "400"),
@@ -646,10 +669,12 @@ def _recipe_delete(seq_name: str) -> dict:
             csv.writer(f).writerows(new_recipe_rows)
         os.replace(tmp, str(recipe_csv))
 
-        # Move SEQ file aside with a timestamp so earlier deletions aren't clobbered
+        # Move deleted SEQ file into the backup dir so the recipe folder stays clean
         if seq_path.exists():
+            bd = _backup_dir()
+            bd.mkdir(exist_ok=True)
             stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
-            os.rename(str(seq_path), f"{seq_path}.{stamp}.deleted")
+            shutil.move(str(seq_path), bd / f"{seq_path.name}.{stamp}.deleted")
 
         return {"ok": True, "seq_name": seq_name}
 

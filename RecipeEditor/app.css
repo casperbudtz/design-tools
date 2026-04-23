@@ -213,7 +213,13 @@ header {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 2px 6px;
+  margin-left: -6px;
+  transition: background .12s;
 }
+.recipe-name-heading:hover { background: rgba(13,110,253,.08); }
 
 .step-meta {
   font-family: var(--mono);
@@ -516,8 +522,10 @@ tbody tr.disabled-row:hover td:first-child { background: var(--row-hover); }
   background: transparent;
   transition: border-color .15s;
 }
+.cell-input.wide { width: 76px; }
 .cell-input:focus { outline: none; border-color: var(--accent); background: #fff; }
 .cell-input:invalid { border-color: #ef4444; }
+.cell-input:disabled { opacity: .3; cursor: not-allowed; }
 
 /* ── Settings panel ──────────────────────────────────────────── */
 .settings-overlay {
