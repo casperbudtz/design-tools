@@ -3,11 +3,26 @@
 # Run once as root after setting up the service.
 set -e
 
-iptables -t nat -A PREROUTING  -p tcp --dport 80 -j REDIRECT --to-port 8080
-iptables -t nat -A OUTPUT      -p tcp --dport 80 -j REDIRECT --to-port 8080
+iptables -t nat -A PREROUTING  -p tcp --dport 80 -j REDIRECT --to-port 8082
+iptables -t nat -A OUTPUT      -p tcp --dport 80 -j REDIRECT --to-port 8082
 
-# Persist across reboots (requires iptables-persistent)
-#   sudo apt install iptables-persistent
-netfilter-persistent save
+# Persist across reboots via a systemd one-shot service
+cat > /etc/systemd/system/iptables-port80.service << 'EOF'
+[Unit]
+Description=Redirect port 80 to 8082
+After=network.target
 
-echo "Port 80 → 8080 redirect active and saved."
+[Service]
+Type=oneshot
+ExecStart=/sbin/iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 8082
+ExecStart=/sbin/iptables -t nat -A OUTPUT -p tcp --dport 80 -j REDIRECT --to-port 8082
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable iptables-port80
+
+echo "Port 80 → 8082 redirect active and will persist across reboots."

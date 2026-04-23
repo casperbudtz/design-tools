@@ -565,11 +565,6 @@
       font-weight: 700;
       flex: 1;
     }
-    .settings-header .settings-sub {
-      font-size: .72rem;
-      color: var(--muted);
-      font-family: var(--mono);
-    }
     .btn-close-settings {
       background: none;
       border: none;
@@ -675,8 +670,7 @@
   <div class="settings-overlay" id="settings-overlay" onclick="overlayClick(event)">
     <div class="settings-panel">
       <div class="settings-header">
-        <h2>Import Settings</h2>
-        <span class="settings-sub">LPR material → step name</span>
+        <h2>Settings</h2>
         <button class="btn-close-settings" onclick="closeSettings()" title="Close">
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
             <line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/>
@@ -684,7 +678,16 @@
         </button>
       </div>
       <div class="settings-body">
-        <div class="settings-section-title">Material step mapping</div>
+        <div class="settings-section-title">Recipe directory</div>
+        <div style="margin-bottom:16px;">
+          <input type="text" id="recipe-dir-input"
+            style="width:100%;font-family:var(--mono);font-size:.74rem;padding:7px 10px;border:1px solid var(--border);border-radius:5px;color:var(--text);background:var(--bg);transition:border-color .15s;"
+            onfocus="this.style.borderColor='var(--accent)';this.style.background='#fff'"
+            onblur="this.style.borderColor='var(--border)';this.style.background='var(--bg)'"
+            placeholder="/path/to/recipe/directory">
+          <div style="font-size:.68rem;color:var(--muted);margin-top:5px;">Path to the folder containing RECIPE.csv and SEQ_*.CSV files.</div>
+        </div>
+        <div class="settings-section-title">LPR material → step name</div>
         <div id="material-rows">
           <div style="color:var(--muted);font-size:.8rem;padding:12px 0;">Loading…</div>
         </div>
@@ -1178,8 +1181,9 @@
           fetch("/recipeeditor/api/layer-names"),
           fetch("/recipeeditor/api/import-settings"),
         ]);
-        _layerNames   = await namesRes.json();
+        _layerNames      = await namesRes.json();
         _currentSettings = await settingsRes.json();
+        document.getElementById("recipe-dir-input").value = _currentSettings.recipe_dir || "";
         renderMaterialRows();
       } catch (e) {
         container.innerHTML = `<div style="color:#dc2626;font-size:.8rem;padding:12px 0;">Failed to load settings</div>`;
@@ -1210,6 +1214,7 @@
       const selects = document.querySelectorAll(".material-select");
       const matSteps = {};
       selects.forEach(sel => { matSteps[sel.dataset.material] = sel.value; });
+      const recipeDir = document.getElementById("recipe-dir-input").value.trim();
 
       const status = document.getElementById("settings-save-status");
       status.textContent = "";
@@ -1219,10 +1224,11 @@
         const r = await fetch("/recipeeditor/api/import-settings", {
           method: "POST",
           headers: {"Content-Type": "application/json"},
-          body: JSON.stringify({ material_steps: matSteps }),
+          body: JSON.stringify({ recipe_dir: recipeDir, material_steps: matSteps }),
         });
         const data = await r.json();
         if (data.ok) {
+          _currentSettings.recipe_dir = recipeDir;
           _currentSettings.material_steps = matSteps;
           status.textContent = "Saved";
           status.className = "settings-save-status ok";

@@ -136,10 +136,8 @@ def _optilayer_build_index():
 
 # ── Recipe Editor ─────────────────────────────────────────────────────────────
 
-RECIPE_DIR       = BASE / "RecipeEditor" / "recipe"
-RECIPE_CSV       = RECIPE_DIR / "RECIPE.csv"
-LAYER_CSV        = RECIPE_DIR / "Layer.CSV"
-IMPORT_SETTINGS  = BASE / "RecipeEditor" / "import_settings.json"
+_DEFAULT_RECIPE_DIR  = str(BASE / "RecipeEditor" / "recipe")
+IMPORT_SETTINGS      = BASE / "RecipeEditor" / "import_settings.json"
 
 # Known materials and their default step names (used when no settings file exists)
 _DEFAULT_MATERIAL_STEPS = {
@@ -148,25 +146,14 @@ _DEFAULT_MATERIAL_STEPS = {
     "Nb2O5":  "PVD1_Nb2O5_FAT",
 }
 
-def _layer_names() -> list[str]:
-    """Return all step names defined in Layer.CSV (the :Names row, skipping EDIT/TEST/INIT/---)."""
-    import csv as _csv
-    try:
-        with open(LAYER_CSV, encoding="utf-8-sig", newline="") as f:
-            for row in _csv.reader(f):
-                if row and row[0].strip() == ":Names":
-                    # cols 0=param, 1=type, 2=EDIT, 3=TEST, then actual layer names
-                    skip = {"EDIT", "TEST", "INIT", "---", ""}
-                    return [v.strip() for v in row[4:] if v.strip() not in skip]
-    except FileNotFoundError:
-        pass
-    return []
-
 def _import_settings_load() -> dict:
     if IMPORT_SETTINGS.exists():
         with open(IMPORT_SETTINGS, encoding="utf-8") as f:
             return json.load(f)
-    return {"material_steps": dict(_DEFAULT_MATERIAL_STEPS)}
+    return {
+        "recipe_dir":    _DEFAULT_RECIPE_DIR,
+        "material_steps": dict(_DEFAULT_MATERIAL_STEPS),
+    }
 
 def _import_settings_save(data: dict):
     tmp = str(IMPORT_SETTINGS) + ".tmp"
@@ -174,10 +161,27 @@ def _import_settings_save(data: dict):
         json.dump(data, f, indent=2)
     os.replace(tmp, str(IMPORT_SETTINGS))
 
+def _get_recipe_dir() -> Path:
+    return Path(_import_settings_load().get("recipe_dir", _DEFAULT_RECIPE_DIR))
+
+def _layer_names() -> list[str]:
+    import csv as _csv
+    layer_csv = _get_recipe_dir() / "Layer.CSV"
+    try:
+        with open(layer_csv, encoding="utf-8-sig", newline="") as f:
+            for row in _csv.reader(f):
+                if row and row[0].strip() == ":Names":
+                    skip = {"EDIT", "TEST", "INIT", "---", ""}
+                    return [v.strip() for v in row[4:] if v.strip() not in skip]
+    except FileNotFoundError:
+        pass
+    return []
+
 def _recipe_list():
     """Return list of {name, seq_name, change_date, first_step, last_step} from RECIPE.csv."""
     import csv as _csv
-    with open(RECIPE_CSV, encoding="utf-8-sig") as f:
+    recipe_csv = _get_recipe_dir() / "RECIPE.csv"
+    with open(recipe_csv, encoding="utf-8-sig") as f:
         rows = list(_csv.reader(f))
     names_row  = next(r for r in rows if r and r[0].strip() == ":Names")
     seq_row    = next(r for r in rows if r and r[0].strip() == "EDIT_RECIPE_NAME")
@@ -201,7 +205,7 @@ def _recipe_list():
 def _seq_data(seq_name: str) -> dict:
     """Parse SEQ_<seq_name>.CSV and return transposed step data."""
     import csv as _csv
-    path = RECIPE_DIR / f"SEQ_{seq_name}.CSV"
+    path = _get_recipe_dir() / f"SEQ_{seq_name}.CSV"
     if not path.exists():
         return None
     with open(path, encoding="utf-8-sig") as f:
@@ -248,7 +252,9 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
     seq_name = proc_name  # SEQ file will be SEQ_<proc_name>.CSV
 
     # Check for collision
-    seq_path = RECIPE_DIR / f"SEQ_{seq_name}.CSV"
+    recipe_dir = _get_recipe_dir()
+    recipe_csv = recipe_dir / "RECIPE.csv"
+    seq_path = recipe_dir / f"SEQ_{seq_name}.CSV"
     if seq_path.exists():
         return {"error": f"SEQ_{seq_name}.CSV already exists"}
 
@@ -303,7 +309,7 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
         return f"PVD_{material}"
 
     # Read SEQ_Template.CSV
-    template_path = RECIPE_DIR / "SEQ_Template.CSV"
+    template_path = recipe_dir / "SEQ_Template.CSV"
     if not template_path.exists():
         return {"error": "SEQ_Template.CSV not found"}
     with open(template_path, encoding="utf-8-sig", newline="") as f:
@@ -382,7 +388,7 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
         _csv.writer(f).writerows(new_rows)
 
     # Update RECIPE.csv — add a new column copied from Template, with updated fields
-    with open(RECIPE_CSV, encoding="utf-8-sig", newline="") as f:
+    with open(recipe_csv, encoding="utf-8-sig", newline="") as f:
         recipe_rows = list(_csv.reader(f))
 
     recipe_names_idx = next(i for i, r in enumerate(recipe_rows) if r and r[0].strip() == ":Names")
@@ -407,11 +413,11 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
         new_val = recipe_overrides.get(param, tmpl_val)
         new_recipe_rows.append(list(r) + [new_val])
 
-    shutil.copy2(str(RECIPE_CSV), str(RECIPE_CSV) + ".bak")
-    tmp = str(RECIPE_CSV) + ".tmp"
+    shutil.copy2(str(recipe_csv), str(recipe_csv) + ".bak")
+    tmp = str(recipe_csv) + ".tmp"
     with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
         _csv.writer(f).writerows(new_recipe_rows)
-    os.replace(tmp, str(RECIPE_CSV))
+    os.replace(tmp, str(recipe_csv))
 
     return {
         "ok":         True,
@@ -425,7 +431,7 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
 def _seq_save(seq_name: str, steps_data: list) -> dict:
     """Write edited step values back to SEQ_<seq_name>.CSV."""
     import csv as _csv, shutil
-    path = RECIPE_DIR / f"SEQ_{seq_name}.CSV"
+    path = _get_recipe_dir() / f"SEQ_{seq_name}.CSV"
     if not path.exists():
         return {"error": f"SEQ_{seq_name}.CSV not found"}
 
@@ -473,8 +479,10 @@ def _recipe_rename(old_seq_name: str, new_name: str) -> dict:
     if not new_seq_name:
         return {"error": "New name cannot be empty"}
 
-    old_seq_path = RECIPE_DIR / f"SEQ_{old_seq_name}.CSV"
-    new_seq_path = RECIPE_DIR / f"SEQ_{new_seq_name}.CSV"
+    recipe_dir = _get_recipe_dir()
+    recipe_csv = recipe_dir / "RECIPE.csv"
+    old_seq_path = recipe_dir / f"SEQ_{old_seq_name}.CSV"
+    new_seq_path = recipe_dir / f"SEQ_{new_seq_name}.CSV"
 
     if not old_seq_path.exists():
         return {"error": f"SEQ_{old_seq_name}.CSV not found"}
@@ -482,7 +490,7 @@ def _recipe_rename(old_seq_name: str, new_name: str) -> dict:
         return {"error": f"SEQ_{new_seq_name}.CSV already exists"}
 
     # Update RECIPE.csv first
-    with open(RECIPE_CSV, encoding="utf-8-sig", newline="") as f:
+    with open(recipe_csv, encoding="utf-8-sig", newline="") as f:
         recipe_rows = list(_csv.reader(f))
 
     names_row = next(r for r in recipe_rows if r and r[0].strip() == ":Names")
@@ -501,11 +509,11 @@ def _recipe_rename(old_seq_name: str, new_name: str) -> dict:
             row[col] = new_seq_name
         new_recipe_rows.append(row)
 
-    shutil.copy2(str(RECIPE_CSV), str(RECIPE_CSV) + ".bak")
-    tmp = str(RECIPE_CSV) + ".tmp"
+    shutil.copy2(str(recipe_csv), str(recipe_csv) + ".bak")
+    tmp = str(recipe_csv) + ".tmp"
     with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
         _csv.writer(f).writerows(new_recipe_rows)
-    os.replace(tmp, str(RECIPE_CSV))
+    os.replace(tmp, str(recipe_csv))
 
     # Rename the SEQ file
     if old_seq_name != new_seq_name:
@@ -517,10 +525,12 @@ def _recipe_rename(old_seq_name: str, new_name: str) -> dict:
 def _recipe_delete(seq_name: str) -> dict:
     """Delete a recipe: removes its SEQ file and column from RECIPE.csv."""
     import csv as _csv, shutil
-    seq_path = RECIPE_DIR / f"SEQ_{seq_name}.CSV"
+    recipe_dir = _get_recipe_dir()
+    recipe_csv = recipe_dir / "RECIPE.csv"
+    seq_path   = recipe_dir / f"SEQ_{seq_name}.CSV"
 
     # Find column in RECIPE.csv
-    with open(RECIPE_CSV, encoding="utf-8-sig", newline="") as f:
+    with open(recipe_csv, encoding="utf-8-sig", newline="") as f:
         recipe_rows = list(_csv.reader(f))
 
     names_row = next(r for r in recipe_rows if r and r[0].strip() == ":Names")
@@ -534,11 +544,11 @@ def _recipe_delete(seq_name: str) -> dict:
         for r in recipe_rows
     ]
 
-    shutil.copy2(str(RECIPE_CSV), str(RECIPE_CSV) + ".bak")
-    tmp = str(RECIPE_CSV) + ".tmp"
+    shutil.copy2(str(recipe_csv), str(recipe_csv) + ".bak")
+    tmp = str(recipe_csv) + ".tmp"
     with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
         _csv.writer(f).writerows(new_recipe_rows)
-    os.replace(tmp, str(RECIPE_CSV))
+    os.replace(tmp, str(recipe_csv))
 
     # Delete the SEQ file (move to .deleted for safety)
     if seq_path.exists():
@@ -662,8 +672,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/recipeeditor/api/import-settings":
             body = self._read_json_body()
-            if not body or "material_steps" not in body:
-                self._send_json({"error": "Missing material_steps"}, 400)
+            if not body or "material_steps" not in body or "recipe_dir" not in body:
+                self._send_json({"error": "Missing recipe_dir or material_steps"}, 400)
                 return
             try:
                 _import_settings_save(body)
