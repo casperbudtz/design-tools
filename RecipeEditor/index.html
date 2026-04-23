@@ -1149,7 +1149,12 @@
             const item  = Array.from(items).find(el => el.querySelector(".rname").textContent === newRecipe.name);
             selectRecipe(item || null, newRecipe);
           }
-          alert(`Imported "${data.name}"\n${data.layers} coating layers → ${data.steps} total steps`);
+          let msg = `Imported "${data.name}"\n${data.layers} coating layers → ${data.steps} total steps`;
+          if (data.warnings && data.warnings.length > 0) {
+            msg += `\n\n⚠️ Refractive index warnings (clamped values used):\n` +
+              data.warnings.map(w => `• ${w}`).join("\n");
+          }
+          alert(msg);
         } else {
           alert(`Import failed:\n${data.error}`);
         }

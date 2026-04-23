@@ -275,13 +275,32 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
                     pass
             ri_table[mat] = wl_map
 
+    ri_warnings: list[str] = []
+
     def _get_ri(material: str, wavelength: float) -> str:
         wl_map = ri_table.get(material, {})
         if not wl_map:
             return ""
-        # Find closest wavelength
-        closest = min(wl_map, key=lambda w: abs(w - wavelength))
-        return str(round(wl_map[closest], 6)).rstrip("0").rstrip(".")
+        wls = sorted(wl_map)
+        if wavelength <= wls[0]:
+            ri_warnings.append(
+                f"{material} @ {wavelength:.0f} nm is below dispersion range "
+                f"({wls[0]:.0f}–{wls[-1]:.0f} nm); clamped to {wls[0]:.0f} nm"
+            )
+            n = wl_map[wls[0]]
+        elif wavelength >= wls[-1]:
+            ri_warnings.append(
+                f"{material} @ {wavelength:.0f} nm is above dispersion range "
+                f"({wls[0]:.0f}–{wls[-1]:.0f} nm); clamped to {wls[-1]:.0f} nm"
+            )
+            n = wl_map[wls[-1]]
+        else:
+            # Find bracketing points and linearly interpolate
+            hi = next(w for w in wls if w >= wavelength)
+            lo = wls[wls.index(hi) - 1]
+            t = (wavelength - lo) / (hi - lo)
+            n = wl_map[lo] + t * (wl_map[hi] - wl_map[lo])
+        return str(round(n, 6)).rstrip("0").rstrip(".")
 
     # Parse ProcessLayer elements
     ps = root.find(".//Processspreadsheet")
@@ -425,6 +444,7 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
         "seq_name":   seq_name,
         "steps":      total_steps,
         "layers":     num_coating,
+        "warnings":   ri_warnings,
     }
 
 
