@@ -1,0 +1,15 @@
+[Unit]
+Description=Design Tools — work (port 8081)
+After=network.target
+
+[Service]
+Type=simple
+User=<target-user>
+WorkingDirectory=/home/<target-user>/design-tools
+ExecStart=/usr/bin/python3 /home/<target-user>/design-tools/server.py 8081
+Restart=on-failure
+RestartSec=5
+Environment=OPTILAYER_DIR=/path/to/optilayer/data
+
+[Install]
+WantedBy=multi-user.target

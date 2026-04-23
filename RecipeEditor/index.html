@@ -23,7 +23,7 @@
       --disabled: #f3f4f6;
       --mono:     'IBM Plex Mono', monospace;
       --sans:     'DM Sans', sans-serif;
-      --header-h: 52px;
+      --header-h: 56px;
       --sidebar-w: 272px;
     }
 
@@ -52,21 +52,7 @@
       z-index: 30;
     }
 
-    .back-link {
-      color: rgba(255,255,255,.45);
-      text-decoration: none;
-      font-size: .72rem;
-      font-weight: 500;
-      letter-spacing: .02em;
-      transition: color .15s;
-      white-space: nowrap;
-    }
-    .back-link:hover { color: rgba(255,255,255,.8); }
-
-    .hdr-div { width: 1px; height: 18px; background: rgba(255,255,255,.15); }
-
-    .hdr-title h1 { font-size: .95rem; font-weight: 700; }
-    .hdr-title p  { font-size: .65rem; opacity: .45; margin-top: 1px; font-family: var(--mono); letter-spacing: .05em; }
+    .hdr-title p  { font-size: .7rem; opacity: .5; font-family: var(--mono); letter-spacing: .04em; }
 
     /* ── Body layout ─────────────────────────────────────────── */
     .layout {
@@ -542,21 +528,174 @@
     }
     .cell-input:focus { outline: none; border-color: var(--accent); background: #fff; }
     .cell-input:invalid { border-color: #ef4444; }
+
+    /* ── Settings panel ──────────────────────────────────────────── */
+    .settings-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.35);
+      z-index: 100;
+      align-items: flex-start;
+      justify-content: center;
+      padding-top: 80px;
+    }
+    .settings-overlay.open { display: flex; }
+
+    .settings-panel {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 8px 32px rgba(0,0,0,.18);
+      width: 480px;
+      max-width: calc(100vw - 40px);
+      overflow: hidden;
+    }
+
+    .settings-header {
+      display: flex;
+      align-items: center;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      background: #f8f9fb;
+      gap: 10px;
+    }
+    .settings-header h2 {
+      font-size: .88rem;
+      font-weight: 700;
+      flex: 1;
+    }
+    .settings-header .settings-sub {
+      font-size: .72rem;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    .btn-close-settings {
+      background: none;
+      border: none;
+      cursor: pointer;
+      color: var(--muted);
+      padding: 4px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      transition: color .15s;
+    }
+    .btn-close-settings:hover { color: var(--text); }
+
+    .settings-body {
+      padding: 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+
+    .settings-section-title {
+      font-size: .65rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 10px;
+    }
+
+    .material-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 8px 0;
+      border-bottom: 1px solid #f3f4f6;
+    }
+    .material-row:last-child { border-bottom: none; }
+
+    .material-label {
+      font-family: var(--mono);
+      font-size: .78rem;
+      font-weight: 600;
+      color: var(--text);
+      width: 80px;
+      flex-shrink: 0;
+    }
+
+    .material-select {
+      flex: 1;
+      font-family: var(--mono);
+      font-size: .74rem;
+      padding: 5px 24px 5px 8px;
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      background-color: var(--bg);
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='5' viewBox='0 0 8 5'%3E%3Cpath d='M0 0l4 5 4-5z' fill='%236b7280'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 8px center;
+      cursor: pointer;
+      transition: border-color .15s;
+    }
+    .material-select:focus { outline: none; border-color: var(--accent); background-color: #fff; }
+
+    .settings-footer {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      padding: 12px 18px;
+      border-top: 1px solid var(--border);
+      background: #f8f9fb;
+    }
+    .settings-save-status {
+      font-size: .74rem;
+      color: var(--muted);
+      flex: 1;
+    }
+    .settings-save-status.ok    { color: #15803d; }
+    .settings-save-status.error { color: #dc2626; }
   </style>
 </head>
 
 <body>
   <header>
-    <a class="back-link" href="/">← Command Central</a>
-    <div class="hdr-div"></div>
     <div class="hdr-title">
-      <h1>Recipe Editor</h1>
       <p>Deposition sequence viewer</p>
     </div>
     <div style="flex:1"></div>
     <input type="file" id="lpr-file-input" accept=".LPR,.lpr" style="display:none">
     <button class="btn-import" onclick="document.getElementById('lpr-file-input').click()">Import LPR</button>
+    <button class="btn-ghost" onclick="openSettings()" style="margin-left:6px;" title="Import settings">
+      <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="10" cy="10" r="3"/>
+        <path d="M10 2v2M10 16v2M2 10h2M16 10h2M4.22 4.22l1.42 1.42M14.36 14.36l1.42 1.42M4.22 15.78l1.42-1.42M14.36 5.64l1.42-1.42"/>
+      </svg>
+    </button>
   </header>
+
+  <!-- Settings overlay -->
+  <div class="settings-overlay" id="settings-overlay" onclick="overlayClick(event)">
+    <div class="settings-panel">
+      <div class="settings-header">
+        <h2>Import Settings</h2>
+        <span class="settings-sub">LPR material → step name</span>
+        <button class="btn-close-settings" onclick="closeSettings()" title="Close">
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="settings-body">
+        <div class="settings-section-title">Material step mapping</div>
+        <div id="material-rows">
+          <div style="color:var(--muted);font-size:.8rem;padding:12px 0;">Loading…</div>
+        </div>
+      </div>
+      <div class="settings-footer">
+        <span class="settings-save-status" id="settings-save-status"></span>
+        <button class="btn-ghost" onclick="closeSettings()">Cancel</button>
+        <button class="btn-save" onclick="saveSettings()">Save</button>
+      </div>
+    </div>
+  </div>
 
   <div class="layout">
     <!-- Sidebar -->
@@ -1020,6 +1159,91 @@
     });
 
     loadRecipes();
+
+    // ── Settings ──────────────────────────────────────────────────
+    let _layerNames = [];
+    let _currentSettings = {};
+
+    async function openSettings() {
+      const overlay = document.getElementById("settings-overlay");
+      overlay.classList.add("open");
+      document.getElementById("settings-save-status").textContent = "";
+      document.getElementById("settings-save-status").className = "settings-save-status";
+
+      const container = document.getElementById("material-rows");
+      container.innerHTML = '<div style="color:var(--muted);font-size:.8rem;padding:12px 0;">Loading…</div>';
+
+      try {
+        const [namesRes, settingsRes] = await Promise.all([
+          fetch("/recipeeditor/api/layer-names"),
+          fetch("/recipeeditor/api/import-settings"),
+        ]);
+        _layerNames   = await namesRes.json();
+        _currentSettings = await settingsRes.json();
+        renderMaterialRows();
+      } catch (e) {
+        container.innerHTML = `<div style="color:#dc2626;font-size:.8rem;padding:12px 0;">Failed to load settings</div>`;
+      }
+    }
+
+    function renderMaterialRows() {
+      const matSteps = _currentSettings.material_steps || {};
+      const container = document.getElementById("material-rows");
+
+      const options = _layerNames.map(n =>
+        `<option value="${esc(n)}">${esc(n)}</option>`
+      ).join("");
+
+      container.innerHTML = Object.entries(matSteps).map(([mat, step]) => `
+        <div class="material-row">
+          <span class="material-label">${esc(mat)}</span>
+          <select class="material-select" data-material="${esc(mat)}">
+            ${_layerNames.map(n =>
+              `<option value="${esc(n)}"${n === step ? " selected" : ""}>${esc(n)}</option>`
+            ).join("")}
+          </select>
+        </div>
+      `).join("");
+    }
+
+    async function saveSettings() {
+      const selects = document.querySelectorAll(".material-select");
+      const matSteps = {};
+      selects.forEach(sel => { matSteps[sel.dataset.material] = sel.value; });
+
+      const status = document.getElementById("settings-save-status");
+      status.textContent = "";
+      status.className = "settings-save-status";
+
+      try {
+        const r = await fetch("/recipeeditor/api/import-settings", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({ material_steps: matSteps }),
+        });
+        const data = await r.json();
+        if (data.ok) {
+          _currentSettings.material_steps = matSteps;
+          status.textContent = "Saved";
+          status.className = "settings-save-status ok";
+          setTimeout(() => closeSettings(), 800);
+        } else {
+          status.textContent = data.error || "Save failed";
+          status.className = "settings-save-status error";
+        }
+      } catch (e) {
+        status.textContent = "Network error";
+        status.className = "settings-save-status error";
+      }
+    }
+
+    function closeSettings() {
+      document.getElementById("settings-overlay").classList.remove("open");
+    }
+
+    function overlayClick(e) {
+      if (e.target === document.getElementById("settings-overlay")) closeSettings();
+    }
   </script>
 </body>
 </html>

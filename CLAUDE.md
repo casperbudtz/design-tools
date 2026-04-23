@@ -4,17 +4,17 @@ This file provides guidance to Claude Code when working in the `DesignTools` rep
 
 ## Workspace Structure
 
-- `server.py` — Web server (port 8080 on target machine, 8081 locally for testing). Serves the Design Tools landing page and routes sub-project requests.
+- `server.py` — Web server (port 8081). Serves the Design Tools landing page and routes sub-project requests.
 - `index.html` — Design Tools landing page. Two cards: Optilayer Indexer and Recipe Editor.
 - `RecipeEditor/` — Viewer and editor for deposition machine recipe files. Reads `RecipeEditor/recipe/RECIPE.csv` and the corresponding `SEQ_<name>.CSV` sequence files. See `RecipeEditor/README.md` for full details.
 - `OptilayerIndexer/` — Search index for OptiLayer multilayer film designs. Parses `DESIGNA.DBS` binary index files. Incremental: caches mtime and skips unchanged folders. Index stored in `OptilayerIndexer/index.json`.
 - `design-tools.service` — systemd service file template (contains `<target-user>` placeholders to fill in on the target machine).
-- `restart-server.sh` — Kills the running server on port 8080 and restarts it (logs to `/tmp/design-tools.log`).
+- `restart-server.sh` — Kills the running server on port 8081 and restarts it (logs to `/tmp/design-tools.log`).
 
 ## Running
 
 ```bash
-# Default port 8080 (use 8081 locally if running alongside CommandCentral):
+# Default port 8081:
 python3 server.py [port]
 
 # Override OptiLayer data path:
@@ -22,9 +22,9 @@ export OPTILAYER_DIR="/mnt/server/Data/Film Data/OptiLayer"
 python3 server.py
 ```
 
-- `http://localhost:8080/` — Design Tools landing page
-- `http://localhost:8080/optilayer/` — Optilayer Indexer
-- `http://localhost:8080/recipeeditor/` — Recipe Editor
+- `http://localhost:8081/` — Design Tools landing page
+- `http://localhost:8081/optilayer/` — Optilayer Indexer
+- `http://localhost:8081/recipeeditor/` — Recipe Editor
 
 ## URL Routes
 
@@ -39,6 +39,9 @@ python3 server.py
 | `GET /recipeeditor/api/seq` | SEQ file for a recipe (`?name=`) |
 | `POST /recipeeditor/api/seq` | Save edited steps back to SEQ CSV (`?name=`) |
 | `POST /recipeeditor/api/import` | Import a Leybold `.LPR` file as a new recipe (`?name=` optional) |
+| `GET /recipeeditor/api/layer-names` | List valid step names from `Layer.CSV` |
+| `GET /recipeeditor/api/import-settings` | Load material→step mapping (`RecipeEditor/import_settings.json`) |
+| `POST /recipeeditor/api/import-settings` | Save material→step mapping |
 | `PATCH /recipeeditor/api/recipe` | Rename a recipe (`?name=`, body `{"new_name":"..."}`) |
 | `DELETE /recipeeditor/api/recipe` | Delete a recipe and its SEQ file (`?name=`) |
 
@@ -69,4 +72,4 @@ All write operations back up files to `.bak` before modifying.
 
 ## UI Conventions
 
-- Every sub-page's `index.html` must include a "← Design Tools" back link pointing to `/`.
+- Sub-pages do not have a back-link. Navigation is handled by the tab bar in the main `index.html` shell.

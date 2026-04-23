@@ -1,0 +1,15 @@
+[Unit]
+Description=Design Tools — live (port 8082)
+After=network.target
+
+[Service]
+Type=simple
+User=<target-user>
+WorkingDirectory=/home/<target-user>/design-tools-live
+ExecStart=/usr/bin/python3 /home/<target-user>/design-tools-live/server.py 8082
+Restart=on-failure
+RestartSec=5
+Environment=OPTILAYER_DIR=/path/to/optilayer/data
+
+[Install]
+WantedBy=multi-user.target

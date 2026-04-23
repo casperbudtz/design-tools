@@ -14,13 +14,16 @@ Routes:
     GET    /recipeeditor/api/recipes    → List all recipes from RECIPE.csv
     GET    /recipeeditor/api/seq        → SEQ file for a recipe (?name=)
     POST   /recipeeditor/api/seq        → Save edited steps (?name=)
-    POST   /recipeeditor/api/import     → Import LPR file (?name= optional override)
+    POST   /recipeeditor/api/import          → Import LPR file (?name= optional override)
+    GET    /recipeeditor/api/layer-names     → List step names from Layer.CSV
+    GET    /recipeeditor/api/import-settings → Load material→step mapping
+    POST   /recipeeditor/api/import-settings → Save material→step mapping
     PATCH  /recipeeditor/api/recipe     → Rename a recipe (?name=, body: new_name)
     DELETE /recipeeditor/api/recipe     → Delete a recipe (?name=)
 
 Usage:
     python3 server.py [port]
-    Default port: 8080  (use 8081 locally if running alongside CommandCentral)
+    Default port: 8081
 
 Configuration:
     OPTILAYER_DIR environment variable overrides the default network share path.
@@ -42,7 +45,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
-PORT       = 8080
+PORT       = 8081
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BASE       = Path(SCRIPT_DIR)
 
@@ -133,8 +136,43 @@ def _optilayer_build_index():
 
 # ── Recipe Editor ─────────────────────────────────────────────────────────────
 
-RECIPE_DIR  = BASE / "RecipeEditor" / "recipe"
-RECIPE_CSV  = RECIPE_DIR / "RECIPE.csv"
+RECIPE_DIR       = BASE / "RecipeEditor" / "recipe"
+RECIPE_CSV       = RECIPE_DIR / "RECIPE.csv"
+LAYER_CSV        = RECIPE_DIR / "Layer.CSV"
+IMPORT_SETTINGS  = BASE / "RecipeEditor" / "import_settings.json"
+
+# Known materials and their default step names (used when no settings file exists)
+_DEFAULT_MATERIAL_STEPS = {
+    "Ta2O5":  "PVD2_Ta2O5_FAT",
+    "SiO2":   "PVD3_SiO2_FO",
+    "Nb2O5":  "PVD1_Nb2O5_FAT",
+}
+
+def _layer_names() -> list[str]:
+    """Return all step names defined in Layer.CSV (the :Names row, skipping EDIT/TEST/INIT/---)."""
+    import csv as _csv
+    try:
+        with open(LAYER_CSV, encoding="utf-8-sig", newline="") as f:
+            for row in _csv.reader(f):
+                if row and row[0].strip() == ":Names":
+                    # cols 0=param, 1=type, 2=EDIT, 3=TEST, then actual layer names
+                    skip = {"EDIT", "TEST", "INIT", "---", ""}
+                    return [v.strip() for v in row[4:] if v.strip() not in skip]
+    except FileNotFoundError:
+        pass
+    return []
+
+def _import_settings_load() -> dict:
+    if IMPORT_SETTINGS.exists():
+        with open(IMPORT_SETTINGS, encoding="utf-8") as f:
+            return json.load(f)
+    return {"material_steps": dict(_DEFAULT_MATERIAL_STEPS)}
+
+def _import_settings_save(data: dict):
+    tmp = str(IMPORT_SETTINGS) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2)
+    os.replace(tmp, str(IMPORT_SETTINGS))
 
 def _recipe_list():
     """Return list of {name, seq_name, change_date, first_step, last_step} from RECIPE.csv."""
@@ -250,13 +288,18 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
     # Trigger mapping
     trigger_map = {"OFFSET": "1", "ABSOLUTE": "2", "BACKWARD_2": "3", "FORWARD": "4"}
 
-    # Step name derivation from material
+    # Step name from saved import settings; fall back to material name
+    settings = _import_settings_load()
+    mat_steps = settings.get("material_steps", {})
+
     def _step_name(material: str) -> str:
+        if material in mat_steps:
+            return mat_steps[material]
+        # fuzzy fallback for unrecognised materials
         m = material.lower()
-        if "ta" in m:
-            return "PVD2_Ta2O5_FAT"
-        if "sio2" in m or "sio₂" in m:
-            return "PVD3_SiO2_FO"
+        for key, step in mat_steps.items():
+            if key.lower() in m:
+                return step
         return f"PVD_{material}"
 
     # Read SEQ_Template.CSV
@@ -543,6 +586,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             else:
                 self._send_json(data)
 
+        elif path == "/recipeeditor/api/layer-names":
+            self._send_json(_layer_names())
+
+        elif path == "/recipeeditor/api/import-settings":
+            self._send_json(_import_settings_load())
+
         else:
             self.send_error(404)
 
@@ -608,6 +657,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             try:
                 entries = _optilayer_build_index()
                 self._send_json({"ok": True, "count": len(entries)})
+            except Exception as e:
+                self._send_json({"error": str(e)}, 500)
+
+        elif path == "/recipeeditor/api/import-settings":
+            body = self._read_json_body()
+            if not body or "material_steps" not in body:
+                self._send_json({"error": "Missing material_steps"}, 400)
+                return
+            try:
+                _import_settings_save(body)
+                self._send_json({"ok": True})
             except Exception as e:
                 self._send_json({"error": str(e)}, 500)
 
