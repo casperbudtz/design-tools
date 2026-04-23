@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.log
+RecipeEditor/recipe/*.bak
+RecipeEditor/recipe/*.tmp
+RecipeEditor/.~lock.*
+RecipeEditor/recipe/.~lock.*
+OptilayerIndexer/index.json

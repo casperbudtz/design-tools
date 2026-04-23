@@ -1,0 +1,14 @@
+[Unit]
+Description=Design Tools web server
+After=network.target
+
+[Service]
+Type=simple
+User=<target-user>
+WorkingDirectory=/home/<target-user>/design-tools
+ExecStart=/usr/bin/python3 /home/<target-user>/design-tools/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

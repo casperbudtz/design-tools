@@ -1,0 +1,565 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Optilayer Indexer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg:      #f0f2f5;
+      --card:    #ffffff;
+      --border:  #e0e4ea;
+      --text:    #1a1a2e;
+      --muted:   #6b7280;
+      --nav:     #1a1a2e;
+      --accent:  #0d6efd;
+      --accent2: #0b5ed7;
+      --mono:    'IBM Plex Mono', monospace;
+      --sans:    'DM Sans', sans-serif;
+      --row-hover: #f5f7ff;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: var(--sans);
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 14px;
+    }
+
+    /* ── Header ─────────────────────────────────────────────────── */
+    header {
+      background: var(--nav);
+      color: #fff;
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,.25);
+      position: sticky;
+      top: 0;
+      z-index: 20;
+    }
+
+    .header-left { display: flex; align-items: center; gap: 20px; }
+
+    .back-link {
+      color: rgba(255,255,255,.5);
+      text-decoration: none;
+      font-size: .75rem;
+      font-weight: 500;
+      letter-spacing: .02em;
+      transition: color .15s;
+      white-space: nowrap;
+    }
+    .back-link:hover { color: rgba(255,255,255,.85); }
+
+    .header-divider {
+      width: 1px; height: 20px;
+      background: rgba(255,255,255,.15);
+    }
+
+    .header-title h1 { font-size: 1rem; font-weight: 700; }
+    .header-title p  { font-size: .7rem; opacity: .5; margin-top: 1px; font-family: var(--mono); letter-spacing: .04em; }
+
+    /* ── Update button ──────────────────────────────────────────── */
+    .btn-update {
+      display: flex; align-items: center; gap: 7px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid rgba(255,255,255,.15);
+      color: #fff;
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-family: var(--sans);
+      font-size: .78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background .15s, border-color .15s;
+      white-space: nowrap;
+    }
+    .btn-update:hover { background: rgba(255,255,255,.14); border-color: rgba(255,255,255,.25); }
+    .btn-update:disabled { opacity: .5; cursor: not-allowed; }
+
+    .spinner {
+      width: 13px; height: 13px;
+      border: 2px solid rgba(255,255,255,.3);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      flex-shrink: 0;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .update-status {
+      font-size: .72rem;
+      color: rgba(255,255,255,.55);
+      white-space: nowrap;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .update-status.ok    { color: #6ee7b7; }
+    .update-status.error { color: #fca5a5; }
+
+    /* ── Main ───────────────────────────────────────────────────── */
+    main {
+      max-width: 1100px;
+      margin: 0 auto;
+      padding: 28px 24px 60px;
+    }
+
+    /* ── Search bar ─────────────────────────────────────────────── */
+    .search-wrap {
+      position: relative;
+      margin-bottom: 14px;
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 14px; top: 50%;
+      transform: translateY(-50%);
+      color: var(--muted);
+      pointer-events: none;
+      display: flex;
+    }
+
+    #search {
+      width: 100%;
+      padding: 11px 14px 11px 42px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: var(--sans);
+      font-size: .95rem;
+      color: var(--text);
+      background: var(--card);
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
+      transition: border-color .15s, box-shadow .15s;
+    }
+    #search:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(13,110,253,.1), 0 1px 4px rgba(0,0,0,.06);
+    }
+    #search::placeholder { color: #b0b8c4; }
+
+    .clear-btn {
+      position: absolute;
+      right: 12px; top: 50%;
+      transform: translateY(-50%);
+      background: none; border: none;
+      color: var(--muted); cursor: pointer;
+      display: none; align-items: center; justify-content: center;
+      padding: 4px;
+      border-radius: 4px;
+      transition: color .15s;
+    }
+    .clear-btn:hover { color: var(--text); }
+    .clear-btn.visible { display: flex; }
+
+    /* ── Meta bar ───────────────────────────────────────────────── */
+    .meta-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 12px;
+      min-height: 22px;
+    }
+
+    .result-count {
+      font-size: .78rem;
+      color: var(--muted);
+      font-family: var(--mono);
+    }
+    .result-count strong { color: var(--text); }
+
+    .loading-bar {
+      height: 2px;
+      width: 120px;
+      background: var(--border);
+      border-radius: 999px;
+      overflow: hidden;
+      display: none;
+    }
+    .loading-bar.active { display: block; }
+    .loading-bar::after {
+      content: '';
+      display: block;
+      height: 100%;
+      width: 40%;
+      background: var(--accent);
+      border-radius: 999px;
+      animation: slide 1s ease-in-out infinite alternate;
+    }
+    @keyframes slide {
+      from { transform: translateX(-100%); }
+      to   { transform: translateX(350%); }
+    }
+
+    .comment-toggle {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: .75rem;
+      color: var(--muted);
+      cursor: pointer;
+      user-select: none;
+      margin-left: auto;
+    }
+    .comment-toggle input { cursor: pointer; accent-color: var(--accent); }
+    .comment-toggle:hover span { color: var(--text); }
+
+    /* ── Table card ─────────────────────────────────────────────── */
+    .table-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06), 0 4px 16px rgba(0,0,0,.04);
+      overflow: hidden;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      table-layout: fixed;
+    }
+
+    colgroup .col-name     { width: 22%; }
+    colgroup .col-folder   { width: 24%; }
+    colgroup .col-comment  { width: 42%; }
+    colgroup .col-modified { width: 12%; }
+
+    thead th {
+      padding: 9px 14px;
+      text-align: left;
+      font-size: .66rem;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: #f8f9fb;
+      border-bottom: 1px solid var(--border);
+      user-select: none;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #f3f4f6;
+      transition: background .1s;
+      cursor: default;
+    }
+    tbody tr:last-child { border-bottom: none; }
+    tbody tr:hover { background: var(--row-hover); }
+
+    tbody td {
+      padding: 9px 14px;
+      font-size: .83rem;
+      line-height: 1.4;
+      overflow: hidden;
+    }
+
+    .td-name {
+      font-weight: 600;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .td-comment {
+      color: var(--muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .td-folder {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .folder-badge {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: .72rem;
+      background: #f0f4ff;
+      color: #3b5bdb;
+      border: 1px solid #c5d0f0;
+      border-radius: 4px;
+      padding: 2px 7px;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      vertical-align: middle;
+    }
+
+    .td-file {
+      font-family: var(--mono);
+      font-size: .72rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .td-modified {
+      font-family: var(--mono);
+      font-size: .72rem;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    /* ── Empty / error state ───────────────────────────────────── */
+    .state-box {
+      padding: 60px 20px;
+      text-align: center;
+      color: var(--muted);
+    }
+    .state-box .state-icon { font-size: 2rem; margin-bottom: 12px; }
+    .state-box p { font-size: .88rem; }
+    .state-box .state-hint { font-size: .78rem; margin-top: 6px; opacity: .7; }
+
+    /* ── Highlight ─────────────────────────────────────────────── */
+    mark {
+      background: #fff3b0;
+      color: inherit;
+      border-radius: 2px;
+      padding: 0 1px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="header-left">
+      <a class="back-link" href="/">← Command Central</a>
+      <div class="header-divider"></div>
+      <div class="header-title">
+        <h1>Optilayer Indexer</h1>
+        <p>Multilayer film design search</p>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span class="update-status" id="update-status"></span>
+      <button class="btn-update" id="btn-update" onclick="updateIndex()">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="1 4 1 10 7 10"/><polyline points="15 12 15 6 9 6"/>
+          <path d="M15 6A7 7 0 1 0 13.4 12.4"/><path d="M1 10A7 7 0 1 0 2.6 3.6"/>
+        </svg>
+        Update Index
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <div class="search-wrap">
+      <span class="search-icon">
+        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <circle cx="8.5" cy="8.5" r="6"/><line x1="13" y1="13" x2="18" y2="18"/>
+        </svg>
+      </span>
+      <input type="text" id="search" placeholder="Search by name, comment, or folder…" autocomplete="off" spellcheck="false">
+      <button class="clear-btn" id="clear-btn" onclick="clearSearch()" title="Clear search">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="2" y1="2" x2="12" y2="12"/><line x1="12" y1="2" x2="2" y2="12"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="meta-bar">
+      <span class="result-count" id="result-count"></span>
+      <div class="loading-bar" id="loading-bar"></div>
+      <label class="comment-toggle">
+        <input type="checkbox" id="search-comments">
+        <span>Search comments</span>
+      </label>
+    </div>
+
+    <div class="table-card">
+      <table>
+        <colgroup>
+          <col class="col-name">
+          <col class="col-folder">
+          <col class="col-comment">
+          <col class="col-modified">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Folder</th>
+            <th>Comment</th>
+            <th>Modified</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div id="state-box" class="state-box" style="display:none;"></div>
+    </div>
+  </main>
+
+  <script>
+    let allEntries = [];
+    let totalCount = 0;
+    let searchTimer = null;
+
+    // ── Init ─────────────────────────────────────────────────────
+
+    async function loadAll() {
+      setLoading(true);
+      try {
+        const r = await fetch("/optilayer/api/search?q=");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        allEntries = await r.json();
+        totalCount = allEntries.length;
+        renderRows(allEntries, "");
+      } catch (e) {
+        showState("⚠️", "Failed to load index", e.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    // ── Search ───────────────────────────────────────────────────
+
+    document.getElementById("search").addEventListener("input", function () {
+      const val = this.value;
+      document.getElementById("clear-btn").classList.toggle("visible", val.length > 0);
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => doSearch(val), 120);
+    });
+
+    document.getElementById("search-comments").addEventListener("change", function () {
+      doSearch(document.getElementById("search").value);
+    });
+
+    function doSearch(q) {
+      const term = q.trim().toLowerCase();
+      const includeComments = document.getElementById("search-comments").checked;
+      if (!term) {
+        renderRows(allEntries, "");
+        return;
+      }
+      const filtered = allEntries.filter(e =>
+        e.name.toLowerCase().includes(term) ||
+        e.folder.toLowerCase().includes(term) ||
+        (includeComments && e.comment.toLowerCase().includes(term))
+      );
+      renderRows(filtered, term);
+    }
+
+    function clearSearch() {
+      document.getElementById("search").value = "";
+      document.getElementById("clear-btn").classList.remove("visible");
+      renderRows(allEntries, "");
+      document.getElementById("search").focus();
+    }
+
+    // ── Render ───────────────────────────────────────────────────
+
+    function hl(text, term) {
+      if (!term || !text) return esc(text);
+      const idx = text.toLowerCase().indexOf(term);
+      if (idx === -1) return esc(text);
+      return esc(text.slice(0, idx)) +
+        "<mark>" + esc(text.slice(idx, idx + term.length)) + "</mark>" +
+        esc(text.slice(idx + term.length));
+    }
+
+    function esc(s) {
+      return (s || "").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+    }
+
+    function renderRows(entries, term) {
+      const tbody  = document.getElementById("tbody");
+      const stateB = document.getElementById("state-box");
+      const count  = document.getElementById("result-count");
+
+      if (entries.length === 0) {
+        tbody.innerHTML = "";
+        if (term) {
+          showState("🔍", "No designs match your search", `Try a different keyword`);
+        } else {
+          showState("📂", "No designs indexed", "Click 'Update Index' to scan for designs");
+        }
+        count.innerHTML = "<strong>0</strong> designs";
+        return;
+      }
+
+      stateB.style.display = "none";
+
+      if (term) {
+        count.innerHTML = `<strong>${entries.length}</strong> of <strong>${totalCount}</strong> designs`;
+      } else {
+        count.innerHTML = `<strong>${entries.length}</strong> design${entries.length !== 1 ? "s" : ""}`;
+      }
+
+      tbody.innerHTML = entries.map(e => {
+        const mod = e.modified ? e.modified.replace('T', ' ') : null;
+        const modDate = e.modified ? e.modified.slice(0, 10) : null;
+        return `
+        <tr>
+          <td class="td-name" title="${esc(e.name)}">${hl(e.name, term)}</td>
+          <td class="td-folder" title="${esc(e.folder)}"><span class="folder-badge">${hl(e.folder, term)}</span></td>
+          <td class="td-comment" title="${esc(e.comment)}">${hl(e.comment, term) || '<span style="opacity:.35">—</span>'}</td>
+          <td class="td-modified" title="${esc(mod)}">${modDate ? esc(modDate) : '<span style="opacity:.35">—</span>'}</td>
+        </tr>`;
+      }).join("");
+    }
+
+    function showState(icon, msg, hint) {
+      const stateB = document.getElementById("state-box");
+      stateB.style.display = "block";
+      stateB.innerHTML = `
+        <div class="state-icon">${icon}</div>
+        <p>${esc(msg)}</p>
+        ${hint ? `<p class="state-hint">${esc(hint)}</p>` : ""}`;
+    }
+
+    function setLoading(on) {
+      document.getElementById("loading-bar").classList.toggle("active", on);
+    }
+
+    // ── Update index ─────────────────────────────────────────────
+
+    async function updateIndex() {
+      const btn    = document.getElementById("btn-update");
+      const status = document.getElementById("update-status");
+      btn.disabled = true;
+      btn.innerHTML = '<div class="spinner"></div> Scanning…';
+      status.textContent = "";
+      status.className = "update-status";
+
+      try {
+        const r    = await fetch("/optilayer/api/update", { method: "POST" });
+        const data = await r.json();
+        if (data.ok) {
+          status.textContent = `Updated — ${data.count} designs`;
+          status.className = "update-status ok";
+          await loadAll();
+          setTimeout(() => { status.textContent = ""; status.className = "update-status"; }, 6000);
+        } else {
+          status.textContent = data.error || "Update failed";
+          status.className = "update-status error";
+        }
+      } catch (e) {
+        status.textContent = "Network error";
+        status.className = "update-status error";
+      } finally {
+        btn.disabled = false;
+        btn.innerHTML = `
+          <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="1 4 1 10 7 10"/><polyline points="15 12 15 6 9 6"/>
+            <path d="M15 6A7 7 0 1 0 13.4 12.4"/><path d="M1 10A7 7 0 1 0 2.6 3.6"/>
+          </svg>
+          Update Index`;
+      }
+    }
+
+    loadAll();
+  </script>
+</body>
+</html>
