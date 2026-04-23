@@ -3,6 +3,8 @@ __pycache__/
 *.log
 RecipeEditor/recipe/*.bak
 RecipeEditor/recipe/*.tmp
+RecipeEditor/recipe/*.deleted
 RecipeEditor/.~lock.*
 RecipeEditor/recipe/.~lock.*
+RecipeEditor/import_settings.json
 OptilayerIndexer/index.json

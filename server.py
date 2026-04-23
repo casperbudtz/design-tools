@@ -32,16 +32,18 @@ Configuration:
         python3 server.py
 """
 
+import csv
 import http.server
+import io
 import json
 import os
+import shutil
 import struct
-import subprocess
 import sys
+import threading
+import traceback
 import urllib.parse
-import urllib.request
 import xml.etree.ElementTree as ET
-import zipfile
 from datetime import datetime
 from pathlib import Path
 
@@ -51,11 +53,16 @@ BASE       = Path(SCRIPT_DIR)
 
 # ── Optilayer Indexer ─────────────────────────────────────────────────────────
 
-# Override with OPTILAYER_DIR env var on the target machine:
+# Path to the folder containing OptiLayer project subdirs, each holding a
+# DESIGNA.DBS index file. Set via env var on the target machine:
 #   export OPTILAYER_DIR="/mnt/server/Data/Film Data/OptiLayer"
-_DEFAULT_OPTILAYER_DIR = "/run/user/1000/kio-fuse-XktOfm/smb/ferropermoptics\\casper@server/Data/Film Data/OptiLayer"
-OPTILAYER_DIR = Path(os.environ.get("OPTILAYER_DIR", _DEFAULT_OPTILAYER_DIR))
+_optilayer_env = os.environ.get("OPTILAYER_DIR", "").strip()
+OPTILAYER_DIR = Path(_optilayer_env) if _optilayer_env else None
 OPTILAYER_IDX = BASE / "OptilayerIndexer" / "index.json"
+
+# Guards against concurrent `/optilayer/api/update` calls doing redundant
+# network-share scans.
+_OPTILAYER_INDEX_LOCK = threading.Lock()
 
 def _optilayer_load_index():
     if OPTILAYER_IDX.exists():
@@ -101,6 +108,21 @@ def _optilayer_parse_dbs(path: Path) -> list[dict]:
 
 
 def _optilayer_build_index():
+    with _OPTILAYER_INDEX_LOCK:
+        return _optilayer_build_index_locked()
+
+
+def _optilayer_build_index_locked():
+    if OPTILAYER_DIR is None:
+        raise RuntimeError(
+            "OPTILAYER_DIR is not set. Set it in the service unit or environment, "
+            "e.g. OPTILAYER_DIR=\"/mnt/server/Data/Film Data/OptiLayer\"."
+        )
+    if not OPTILAYER_DIR.is_dir():
+        raise RuntimeError(
+            f"OPTILAYER_DIR path does not exist or is not a directory: {OPTILAYER_DIR}"
+        )
+
     existing: dict[str, dict] = {}
     if OPTILAYER_IDX.exists():
         try:
@@ -139,6 +161,22 @@ def _optilayer_build_index():
 _DEFAULT_RECIPE_DIR  = str(BASE / "RecipeEditor" / "recipe")
 IMPORT_SETTINGS      = BASE / "RecipeEditor" / "import_settings.json"
 
+# Serialize all recipe-file writes. HTTPServer is single-threaded today, but
+# this also protects against re-entrant calls from shared helpers.
+_RECIPE_WRITE_LOCK = threading.Lock()
+
+
+def _timestamped_backup(path: Path) -> None:
+    """Copy `path` to `path.<ISO-timestamp>.bak` before we modify it.
+
+    Previous versions used a single `.bak` file, which got overwritten on the
+    next save — losing the prior backup. Timestamped names keep every save.
+    """
+    if not path.exists():
+        return
+    stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+    shutil.copy2(str(path), f"{path}.{stamp}.bak")
+
 # Known materials and their default step names (used when no settings file exists)
 _DEFAULT_MATERIAL_STEPS = {
     "Ta2O5":  "PVD2_Ta2O5_FAT",
@@ -161,15 +199,52 @@ def _import_settings_save(data: dict):
         json.dump(data, f, indent=2)
     os.replace(tmp, str(IMPORT_SETTINGS))
 
+
+def _validate_import_settings(data: dict) -> str | None:
+    """Check settings before saving. Returns an error string, or None if OK."""
+    if not isinstance(data, dict):
+        return "Settings payload must be a JSON object"
+
+    recipe_dir = data.get("recipe_dir")
+    if not isinstance(recipe_dir, str) or not recipe_dir.strip():
+        return "recipe_dir must be a non-empty string"
+    rd = Path(recipe_dir)
+    if not rd.is_dir():
+        return f"recipe_dir does not exist or is not a directory: {recipe_dir}"
+    if not (rd / "RECIPE.csv").exists():
+        return f"RECIPE.csv not found in {recipe_dir}"
+
+    mat_steps = data.get("material_steps")
+    if not isinstance(mat_steps, dict):
+        return "material_steps must be a JSON object"
+    if not all(isinstance(k, str) and isinstance(v, str) for k, v in mat_steps.items()):
+        return "material_steps keys and values must be strings"
+
+    # Validate selected step names against Layer.CSV in the *new* recipe_dir.
+    # Skip if Layer.CSV is missing — old install without it shouldn't block saves.
+    layer_csv = rd / "Layer.CSV"
+    if layer_csv.exists():
+        skip = {"EDIT", "TEST", "INIT", "---", ""}
+        valid: list[str] = []
+        with open(layer_csv, encoding="utf-8-sig", newline="") as f:
+            for row in csv.reader(f):
+                if row and row[0].strip() == ":Names":
+                    valid = [v.strip() for v in row[4:] if v.strip() not in skip]
+                    break
+        unknown = [f"{mat}={step}" for mat, step in mat_steps.items() if step and step not in valid]
+        if unknown:
+            return f"Unknown step names in Layer.CSV: {', '.join(unknown)}"
+
+    return None
+
 def _get_recipe_dir() -> Path:
     return Path(_import_settings_load().get("recipe_dir", _DEFAULT_RECIPE_DIR))
 
 def _layer_names() -> list[str]:
-    import csv as _csv
     layer_csv = _get_recipe_dir() / "Layer.CSV"
     try:
         with open(layer_csv, encoding="utf-8-sig", newline="") as f:
-            for row in _csv.reader(f):
+            for row in csv.reader(f):
                 if row and row[0].strip() == ":Names":
                     skip = {"EDIT", "TEST", "INIT", "---", ""}
                     return [v.strip() for v in row[4:] if v.strip() not in skip]
@@ -179,10 +254,9 @@ def _layer_names() -> list[str]:
 
 def _recipe_list():
     """Return list of {name, seq_name, change_date, first_step, last_step} from RECIPE.csv."""
-    import csv as _csv
     recipe_csv = _get_recipe_dir() / "RECIPE.csv"
     with open(recipe_csv, encoding="utf-8-sig") as f:
-        rows = list(_csv.reader(f))
+        rows = list(csv.reader(f))
     names_row  = next(r for r in rows if r and r[0].strip() == ":Names")
     seq_row    = next(r for r in rows if r and r[0].strip() == "EDIT_RECIPE_NAME")
     date_row   = next((r for r in rows if r and r[0].strip() == "EDIT_RECIPE_CHANGE_DATE"), None)
@@ -204,12 +278,11 @@ def _recipe_list():
 
 def _seq_data(seq_name: str) -> dict:
     """Parse SEQ_<seq_name>.CSV and return transposed step data."""
-    import csv as _csv
     path = _get_recipe_dir() / f"SEQ_{seq_name}.CSV"
     if not path.exists():
         return None
     with open(path, encoding="utf-8-sig") as f:
-        rows = list(_csv.reader(f))
+        rows = list(csv.reader(f))
 
     names_row = next(r for r in rows if r and r[0].strip() == ":Names")
     param_rows = [r for r in rows if r and not r[0].startswith(":")]
@@ -239,8 +312,6 @@ def _seq_data(seq_name: str) -> dict:
 
 def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
     """Parse an LPR (XML) file and create a new SEQ_*.CSV + add a RECIPE.csv column."""
-    import csv as _csv, shutil, io
-
     tree = ET.parse(io.BytesIO(lpr_bytes))
     root = tree.getroot()
 
@@ -332,7 +403,7 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
     if not template_path.exists():
         return {"error": "SEQ_Template.CSV not found"}
     with open(template_path, encoding="utf-8-sig", newline="") as f:
-        tmpl_rows = list(_csv.reader(f))
+        tmpl_rows = list(csv.reader(f))
 
     names_row_idx = next(i for i, r in enumerate(tmpl_rows) if r and r[0].strip() == ":Names")
     # Template has cols: 0=param, 1=type, 2=LOAD, 3=step1, 4=step2, ...
@@ -402,41 +473,47 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
 
         new_rows.append([r[0], r[1], load_val, tmpl_step1, tmpl_step2] + coating_vals)
 
-    # Write new SEQ file
-    with open(seq_path, "w", encoding="utf-8-sig", newline="") as f:
-        _csv.writer(f).writerows(new_rows)
+    with _RECIPE_WRITE_LOCK:
+        # Re-check seq file existence under the lock in case of a concurrent import
+        if seq_path.exists():
+            return {"error": f"SEQ_{seq_name}.CSV already exists"}
 
-    # Update RECIPE.csv — add a new column copied from Template, with updated fields
-    with open(recipe_csv, encoding="utf-8-sig", newline="") as f:
-        recipe_rows = list(_csv.reader(f))
+        # Write new SEQ file
+        with open(seq_path, "w", encoding="utf-8-sig", newline="") as f:
+            csv.writer(f).writerows(new_rows)
 
-    recipe_names_idx = next(i for i, r in enumerate(recipe_rows) if r and r[0].strip() == ":Names")
-    template_col = next((j for j, v in enumerate(recipe_rows[recipe_names_idx]) if v.strip() == "Template"), None)
-    if template_col is None:
-        return {"error": "Template column not found in RECIPE.csv"}
+        # Update RECIPE.csv — add a new column copied from Template, with updated fields
+        with open(recipe_csv, encoding="utf-8-sig", newline="") as f:
+            recipe_rows = list(csv.reader(f))
 
-    # Field overrides for new recipe column
-    recipe_overrides = {
-        "EDIT_RECIPE_NAME":        proc_name,
-        ":Names":                  proc_name,
-        "EDIT_RECIPE_COMMENT":     "---",
-        "EDIT_RECIPE_CHANGE_DATE": datetime.now().strftime("%-m/%-d/%Y"),
-        "PCOPC_FirstProcStepNo":   "1",
-        "PCOPC_LastProcStepNo":    str(total_steps),
-    }
+        recipe_names_idx = next(i for i, r in enumerate(recipe_rows) if r and r[0].strip() == ":Names")
+        template_col = next((j for j, v in enumerate(recipe_rows[recipe_names_idx]) if v.strip() == "Template"), None)
+        if template_col is None:
+            return {"error": "Template column not found in RECIPE.csv"}
 
-    new_recipe_rows = []
-    for r in recipe_rows:
-        param = r[0].strip() if r else ""
-        tmpl_val = r[template_col] if len(r) > template_col else ""
-        new_val = recipe_overrides.get(param, tmpl_val)
-        new_recipe_rows.append(list(r) + [new_val])
+        # Field overrides for new recipe column
+        now = datetime.now()
+        recipe_overrides = {
+            "EDIT_RECIPE_NAME":        proc_name,
+            ":Names":                  proc_name,
+            "EDIT_RECIPE_COMMENT":     "---",
+            "EDIT_RECIPE_CHANGE_DATE": f"{now.month}/{now.day}/{now.year}",
+            "PCOPC_FirstProcStepNo":   "1",
+            "PCOPC_LastProcStepNo":    str(total_steps),
+        }
 
-    shutil.copy2(str(recipe_csv), str(recipe_csv) + ".bak")
-    tmp = str(recipe_csv) + ".tmp"
-    with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
-        _csv.writer(f).writerows(new_recipe_rows)
-    os.replace(tmp, str(recipe_csv))
+        new_recipe_rows = []
+        for r in recipe_rows:
+            param = r[0].strip() if r else ""
+            tmpl_val = r[template_col] if len(r) > template_col else ""
+            new_val = recipe_overrides.get(param, tmpl_val)
+            new_recipe_rows.append(list(r) + [new_val])
+
+        _timestamped_backup(recipe_csv)
+        tmp = str(recipe_csv) + ".tmp"
+        with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
+            csv.writer(f).writerows(new_recipe_rows)
+        os.replace(tmp, str(recipe_csv))
 
     return {
         "ok":         True,
@@ -450,51 +527,50 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
 
 def _seq_save(seq_name: str, steps_data: list) -> dict:
     """Write edited step values back to SEQ_<seq_name>.CSV."""
-    import csv as _csv, shutil
     path = _get_recipe_dir() / f"SEQ_{seq_name}.CSV"
     if not path.exists():
         return {"error": f"SEQ_{seq_name}.CSV not found"}
 
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        rows = list(_csv.reader(f))
+    with _RECIPE_WRITE_LOCK:
+        with open(path, encoding="utf-8-sig", newline="") as f:
+            rows = list(csv.reader(f))
 
-    names_row = next(r for r in rows if r and r[0].strip() == ":Names")
-    num_to_col = {names_row[col].strip(): col for col in range(3, len(names_row))}
+        names_row = next(r for r in rows if r and r[0].strip() == ":Names")
+        num_to_col = {names_row[col].strip(): col for col in range(3, len(names_row))}
 
-    param_to_row_idx = {}
-    for i, r in enumerate(rows):
-        if r and not r[0].startswith(":"):
-            param_to_row_idx[r[0].strip().strip('"')] = i
+        param_to_row_idx = {}
+        for i, r in enumerate(rows):
+            if r and not r[0].startswith(":"):
+                param_to_row_idx[r[0].strip().strip('"')] = i
 
-    changes = 0
-    for step in steps_data:
-        col = num_to_col.get(str(step["num"]))
-        if col is None:
-            continue
-        for param, value in step["values"].items():
-            ri = param_to_row_idx.get(param)
-            if ri is None:
+        changes = 0
+        for step in steps_data:
+            col = num_to_col.get(str(step["num"]))
+            if col is None:
                 continue
-            while len(rows[ri]) <= col:
-                rows[ri].append("")
-            if rows[ri][col] != str(value):
-                rows[ri][col] = str(value)
-                changes += 1
+            for param, value in step["values"].items():
+                ri = param_to_row_idx.get(param)
+                if ri is None:
+                    continue
+                while len(rows[ri]) <= col:
+                    rows[ri].append("")
+                if rows[ri][col] != str(value):
+                    rows[ri][col] = str(value)
+                    changes += 1
 
-    if changes == 0:
-        return {"ok": True, "changes": 0}
+        if changes == 0:
+            return {"ok": True, "changes": 0}
 
-    shutil.copy2(str(path), str(path) + ".bak")
-    tmp = str(path) + ".tmp"
-    with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
-        _csv.writer(f).writerows(rows)
-    os.replace(tmp, str(path))
-    return {"ok": True, "changes": changes}
+        _timestamped_backup(path)
+        tmp = str(path) + ".tmp"
+        with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
+            csv.writer(f).writerows(rows)
+        os.replace(tmp, str(path))
+        return {"ok": True, "changes": changes}
 
 
 def _recipe_rename(old_seq_name: str, new_name: str) -> dict:
     """Rename a recipe: renames SEQ file and updates :Names / EDIT_RECIPE_NAME in RECIPE.csv."""
-    import csv as _csv, shutil
     new_seq_name = new_name.strip()
     if not new_seq_name:
         return {"error": "New name cannot be empty"}
@@ -504,77 +580,78 @@ def _recipe_rename(old_seq_name: str, new_name: str) -> dict:
     old_seq_path = recipe_dir / f"SEQ_{old_seq_name}.CSV"
     new_seq_path = recipe_dir / f"SEQ_{new_seq_name}.CSV"
 
-    if not old_seq_path.exists():
-        return {"error": f"SEQ_{old_seq_name}.CSV not found"}
-    if new_seq_path.exists() and old_seq_name != new_seq_name:
-        return {"error": f"SEQ_{new_seq_name}.CSV already exists"}
+    with _RECIPE_WRITE_LOCK:
+        if not old_seq_path.exists():
+            return {"error": f"SEQ_{old_seq_name}.CSV not found"}
+        if new_seq_path.exists() and old_seq_name != new_seq_name:
+            return {"error": f"SEQ_{new_seq_name}.CSV already exists"}
 
-    # Update RECIPE.csv first
-    with open(recipe_csv, encoding="utf-8-sig", newline="") as f:
-        recipe_rows = list(_csv.reader(f))
+        # Update RECIPE.csv first
+        with open(recipe_csv, encoding="utf-8-sig", newline="") as f:
+            recipe_rows = list(csv.reader(f))
 
-    names_row = next(r for r in recipe_rows if r and r[0].strip() == ":Names")
-    col = next((j for j, v in enumerate(names_row) if v.strip() == old_seq_name), None)
-    if col is None:
-        return {"error": f"Recipe '{old_seq_name}' not found in RECIPE.csv"}
+        names_row = next(r for r in recipe_rows if r and r[0].strip() == ":Names")
+        col = next((j for j, v in enumerate(names_row) if v.strip() == old_seq_name), None)
+        if col is None:
+            return {"error": f"Recipe '{old_seq_name}' not found in RECIPE.csv"}
 
-    new_recipe_rows = []
-    for r in recipe_rows:
-        row = list(r)
-        if not row:
+        new_recipe_rows = []
+        for r in recipe_rows:
+            row = list(r)
+            if not row:
+                new_recipe_rows.append(row)
+                continue
+            param = row[0].strip()
+            if param in (":Names", "EDIT_RECIPE_NAME") and col < len(row):
+                row[col] = new_seq_name
             new_recipe_rows.append(row)
-            continue
-        param = row[0].strip()
-        if param in (":Names", "EDIT_RECIPE_NAME") and col < len(row):
-            row[col] = new_seq_name
-        new_recipe_rows.append(row)
 
-    shutil.copy2(str(recipe_csv), str(recipe_csv) + ".bak")
-    tmp = str(recipe_csv) + ".tmp"
-    with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
-        _csv.writer(f).writerows(new_recipe_rows)
-    os.replace(tmp, str(recipe_csv))
+        _timestamped_backup(recipe_csv)
+        tmp = str(recipe_csv) + ".tmp"
+        with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
+            csv.writer(f).writerows(new_recipe_rows)
+        os.replace(tmp, str(recipe_csv))
 
-    # Rename the SEQ file
-    if old_seq_name != new_seq_name:
-        os.rename(str(old_seq_path), str(new_seq_path))
+        # Rename the SEQ file
+        if old_seq_name != new_seq_name:
+            os.rename(str(old_seq_path), str(new_seq_path))
 
-    return {"ok": True, "old_seq_name": old_seq_name, "new_seq_name": new_seq_name}
+        return {"ok": True, "old_seq_name": old_seq_name, "new_seq_name": new_seq_name}
 
 
 def _recipe_delete(seq_name: str) -> dict:
     """Delete a recipe: removes its SEQ file and column from RECIPE.csv."""
-    import csv as _csv, shutil
     recipe_dir = _get_recipe_dir()
     recipe_csv = recipe_dir / "RECIPE.csv"
     seq_path   = recipe_dir / f"SEQ_{seq_name}.CSV"
 
-    # Find column in RECIPE.csv
-    with open(recipe_csv, encoding="utf-8-sig", newline="") as f:
-        recipe_rows = list(_csv.reader(f))
+    with _RECIPE_WRITE_LOCK:
+        with open(recipe_csv, encoding="utf-8-sig", newline="") as f:
+            recipe_rows = list(csv.reader(f))
 
-    names_row = next(r for r in recipe_rows if r and r[0].strip() == ":Names")
-    col = next((j for j, v in enumerate(names_row) if v.strip() == seq_name), None)
-    if col is None:
-        return {"error": f"Recipe '{seq_name}' not found in RECIPE.csv"}
+        names_row = next(r for r in recipe_rows if r and r[0].strip() == ":Names")
+        col = next((j for j, v in enumerate(names_row) if v.strip() == seq_name), None)
+        if col is None:
+            return {"error": f"Recipe '{seq_name}' not found in RECIPE.csv"}
 
-    # Remove that column from every row
-    new_recipe_rows = [
-        [v for j, v in enumerate(r) if j != col]
-        for r in recipe_rows
-    ]
+        # Remove that column from every row
+        new_recipe_rows = [
+            [v for j, v in enumerate(r) if j != col]
+            for r in recipe_rows
+        ]
 
-    shutil.copy2(str(recipe_csv), str(recipe_csv) + ".bak")
-    tmp = str(recipe_csv) + ".tmp"
-    with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
-        _csv.writer(f).writerows(new_recipe_rows)
-    os.replace(tmp, str(recipe_csv))
+        _timestamped_backup(recipe_csv)
+        tmp = str(recipe_csv) + ".tmp"
+        with open(tmp, "w", encoding="utf-8-sig", newline="") as f:
+            csv.writer(f).writerows(new_recipe_rows)
+        os.replace(tmp, str(recipe_csv))
 
-    # Delete the SEQ file (move to .deleted for safety)
-    if seq_path.exists():
-        os.rename(str(seq_path), str(seq_path) + ".deleted")
+        # Move SEQ file aside with a timestamp so earlier deletions aren't clobbered
+        if seq_path.exists():
+            stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
+            os.rename(str(seq_path), f"{seq_path}.{stamp}.deleted")
 
-    return {"ok": True, "seq_name": seq_name}
+        return {"ok": True, "seq_name": seq_name}
 
 
 # ── HTTP handler ──────────────────────────────────────────────────────────────
@@ -594,6 +671,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif path in ("/optilayer", "/optilayer/"):
             self._serve_file(os.path.join(SCRIPT_DIR, "OptilayerIndexer", "index.html"), "text/html; charset=utf-8")
 
+        elif path.startswith("/optilayer/") and self._serve_subproject_asset(path, "OptilayerIndexer"):
+            pass  # handled
+
         elif path == "/optilayer/api/search":
             params = urllib.parse.parse_qs(parsed.query)
             q      = params.get("q", [""])[0].strip().lower()
@@ -607,6 +687,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif path in ("/recipeeditor", "/recipeeditor/"):
             self._serve_file(os.path.join(SCRIPT_DIR, "RecipeEditor", "index.html"), "text/html; charset=utf-8")
+
+        elif path.startswith("/recipeeditor/") and self._serve_subproject_asset(path, "RecipeEditor"):
+            pass  # handled
 
         elif path == "/recipeeditor/api/recipes":
             self._send_json(_recipe_list())
@@ -642,6 +725,37 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(content)
 
+    # Allow .css/.js assets co-located with each subproject's index.html.
+    _ASSET_TYPES = {
+        ".css": "text/css; charset=utf-8",
+        ".js":  "application/javascript; charset=utf-8",
+    }
+
+    def _serve_subproject_asset(self, url_path: str, subdir: str) -> bool:
+        """Serve a whitelisted static asset from `subdir`. Returns True if handled."""
+        # url_path is e.g. "/optilayer/app.css" — strip the prefix
+        prefix = "/" + subdir.lower().replace("indexer", "").replace("editor", "") + "/"
+        # Simpler: derive from subdir directly
+        if subdir == "OptilayerIndexer":
+            prefix = "/optilayer/"
+        elif subdir == "RecipeEditor":
+            prefix = "/recipeeditor/"
+        else:
+            return False
+
+        rel = url_path[len(prefix):]
+        if not rel or "/" in rel or rel.startswith("."):
+            return False  # no subdirs, no hidden files
+        ext = os.path.splitext(rel)[1].lower()
+        content_type = self._ASSET_TYPES.get(ext)
+        if not content_type:
+            return False
+        filepath = os.path.join(SCRIPT_DIR, subdir, rel)
+        if not os.path.isfile(filepath):
+            return False
+        self._serve_file(filepath, content_type)
+        return True
+
     def _send_json(self, data, status=200):
         content = json.dumps(data, indent=2).encode()
         self.send_response(status)
@@ -671,6 +785,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = _seq_save(name, body["steps"])
                 self._send_json(result, 200 if result.get("ok") else 400)
             except Exception as e:
+                traceback.print_exc()
                 self._send_json({"error": str(e)}, 500)
 
         elif path == "/recipeeditor/api/import":
@@ -685,13 +800,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = _lpr_import(lpr_bytes, recipe_name)
                 self._send_json(result, 200 if result.get("ok") else 400)
             except Exception as e:
+                traceback.print_exc()
                 self._send_json({"error": str(e)}, 500)
 
         elif path == "/optilayer/api/update":
             try:
                 entries = _optilayer_build_index()
                 self._send_json({"ok": True, "count": len(entries)})
+            except RuntimeError as e:
+                # Configuration errors are user-fixable; surface cleanly.
+                self._send_json({"error": str(e)}, 400)
             except Exception as e:
+                traceback.print_exc()
                 self._send_json({"error": str(e)}, 500)
 
         elif path == "/recipeeditor/api/import-settings":
@@ -699,10 +819,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not body or "material_steps" not in body or "recipe_dir" not in body:
                 self._send_json({"error": "Missing recipe_dir or material_steps"}, 400)
                 return
+            err = _validate_import_settings(body)
+            if err:
+                self._send_json({"error": err}, 400)
+                return
             try:
                 _import_settings_save(body)
                 self._send_json({"ok": True})
             except Exception as e:
+                traceback.print_exc()
                 self._send_json({"error": str(e)}, 500)
 
         else:
@@ -722,6 +847,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = _recipe_delete(name)
                 self._send_json(result, 200 if result.get("ok") else 400)
             except Exception as e:
+                traceback.print_exc()
                 self._send_json({"error": str(e)}, 500)
 
         else:
@@ -743,6 +869,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 result = _recipe_rename(name, new_name)
                 self._send_json(result, 200 if result.get("ok") else 400)
             except Exception as e:
+                traceback.print_exc()
                 self._send_json({"error": str(e)}, 500)
 
         else:
