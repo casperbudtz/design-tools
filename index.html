@@ -12,6 +12,7 @@
       --bg:     #f0f2f5;
       --header-h: 56px;
     }
+    /* --nav is overridden by JS once /api/mode responds */
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -149,6 +150,16 @@
     }
 
     window.addEventListener('hashchange', () => switchTab(resolveTab()));
+
+    // Apply nav colour based on work/live mode
+    const NAV_COLORS = {
+      live: '#1a3a8f',  // deep royal blue
+      work: '#6e1a1a',  // dark red
+    };
+    fetch('/api/mode').then(r => r.json()).then(data => {
+      const color = NAV_COLORS[data.mode];
+      if (color) document.documentElement.style.setProperty('--nav', color);
+    }).catch(() => {});
 
     // Init
     switchTab(resolveTab());

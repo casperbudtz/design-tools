@@ -564,7 +564,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         path   = parsed.path
 
-        if path == "/":
+        if path == "/api/mode":
+            mode = "live" if RUNNING_PORT == 8082 else "work"
+            self._send_json({"mode": mode, "port": RUNNING_PORT})
+
+        elif path == "/":
             self._serve_file(os.path.join(SCRIPT_DIR, "index.html"), "text/html; charset=utf-8")
 
         elif path in ("/optilayer", "/optilayer/"):
@@ -728,8 +732,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         print(f"[{datetime.now().strftime('%H:%M:%S')}] {fmt % args}")
 
 
+RUNNING_PORT = PORT  # updated at startup before server starts
+
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else PORT
+    RUNNING_PORT = port
     print(f"Design Tools     →  http://localhost:{port}")
     print(f"Optilayer Indexer →  http://localhost:{port}/optilayer/")
     print(f"Recipe Editor    →  http://localhost:{port}/recipeeditor/")
