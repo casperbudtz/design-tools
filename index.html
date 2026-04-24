@@ -82,6 +82,51 @@
       line-height: 1;
     }
 
+    /* ── Version label ───────────────────────────────────────────── */
+    .hdr-version {
+      margin-left: auto;
+      padding-right: 16px;
+      font-size: .72rem;
+      color: rgba(255,255,255,.35);
+      white-space: nowrap;
+      align-self: center;
+    }
+
+    /* ── Update banner ───────────────────────────────────────────── */
+    #update-banner {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #1e293b;
+      color: #f1f5f9;
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: .84rem;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.3);
+      z-index: 1000;
+    }
+    #update-banner button {
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      border-radius: 5px;
+      padding: 4px 10px;
+      font-size: .82rem;
+      cursor: pointer;
+    }
+    #update-banner button:hover { background: #2563eb; }
+    #update-banner button.dismiss {
+      background: transparent;
+      color: #94a3b8;
+      padding: 2px 4px;
+      font-size: .9rem;
+    }
+    #update-banner button.dismiss:hover { color: #f1f5f9; }
+
     /* ── iframe wrapper ──────────────────────────────────────────── */
     .frame-wrap {
       height: calc(100vh - var(--header-h));
@@ -110,6 +155,7 @@
         Recipe Editor
       </button>
     </nav>
+    <span class="hdr-version" id="hdr-version"></span>
   </header>
 
   <div class="frame-wrap">
@@ -163,6 +209,36 @@
 
     // Init
     switchTab(resolveTab());
+
+    // ── Update check ─────────────────────────────────────────────
+    let _pageVersion = null;
+
+    async function checkForUpdate() {
+      try {
+        const r = await fetch('/api/version');
+        if (!r.ok) return;
+        const { mtime, label } = await r.json();
+        if (_pageVersion === null) {
+          _pageVersion = mtime;
+          document.getElementById('hdr-version').textContent = label;
+        } else if (mtime !== _pageVersion) {
+          showUpdateBanner(label);
+        }
+      } catch (_) {}
+    }
+
+    function showUpdateBanner(label) {
+      if (document.getElementById('update-banner')) return;
+      const banner = document.createElement('div');
+      banner.id = 'update-banner';
+      banner.innerHTML =
+        `Page updated (${label}) — <button onclick="location.reload()">Reload</button>` +
+        `<button class="dismiss" onclick="this.parentElement.remove()" title="Dismiss">✕</button>`;
+      document.body.appendChild(banner);
+    }
+
+    checkForUpdate();
+    setInterval(checkForUpdate, 30 * 1000);
   </script>
 </body>
 </html>

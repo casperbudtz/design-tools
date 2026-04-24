@@ -547,3 +547,4 @@ function closeSettings() {
 function overlayClick(e) {
   if (e.target === document.getElementById("settings-overlay")) closeSettings();
 }
+

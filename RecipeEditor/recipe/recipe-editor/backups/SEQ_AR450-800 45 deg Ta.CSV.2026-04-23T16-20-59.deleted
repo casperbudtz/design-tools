@@ -1,0 +1,21 @@
+﻿:IngredientName,IngredientType,Unit,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe,Recipe
+:Names,,LOAD,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18
+SEQ_Enable,Discrete,SEQ_Enable,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+SEQ_StepName,Message,SEQ_StepName,Heating_FAT,PBS_on FAT,PVD2_Ta2O5_FAT,PVD3_SiO2_FO,PVD2_Ta2O5_FAT,PVD3_SiO2_FO,PVD2_Ta2O5_FAT,PVD3_SiO2_FO,PVD2_Ta2O5_FAT,PVD3_SiO2_FO,PVD2_Ta2O5_FAT,PVD3_SiO2_FO,PVD2_Ta2O5_FAT,PVD3_SiO2_FO,PVD2_Ta2O5_FAT,PVD3_SiO2_FO,PVD2_Ta2O5_FAT,PVD3_SiO2_FO
+SEQ_MaxTime,Analog,SEQ_MaxTime,0,0,48,195,511,290,0,0,366,0,0,642,0,0,440,0,0,0
+SEQ_StepType,Analog,SEQ_StepType,1,1,3,3,3,3,4,4,3,4,4,3,4,4,3,4,4,4
+SEQ_StepTime,Analog,SEQ_StepTime,120,120,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+SEQ_Rounds,Analog,SEQ_Rounds,0,0,72,292,766,435,93,439,549,70,129,963,69,205,660,49,772,642
+SEQ_Values,Analog,SEQ_Values,0,0,1,1,1,1,2,2,1,2,3,1,3,3,1,3,4,3
+SEQ_QWOT,Analog,SEQ_QWOT,0,0,0.3279,0.7385,3.5041,1.0999,0.4248,1.109,2.5111,0.1765,0.5889,2.436,0.3136,0.5185,3.0207,0.1234,3.531,1.6235
+SEQ_Wavelength,Analog,SEQ_Wavelength,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400,400
+SEQ_BBM_LayerNo,Analog,SEQ_BBM_LayerNo,0,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16
+SEQ_Testslide,Analog,SEQ_Testslide,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+SEQ_MaterialID,Message,SEQ_MaterialID,----,----,Ta2O5_HP v01,SiO2_HP v01,Ta2O5_HP v01,SiO2_HP v01,Ta2O5_HP v01,SiO2_HP v01,Ta2O5_HP v01,SiO2_HP v01,Ta2O5_HP v01,SiO2_HP v01,Ta2O5_HP v01,SiO2_HP v01,Ta2O5_HP v01,SiO2_HP v01,Ta2O5_HP v01,SiO2_HP v01
+SEQ_RefractiveIndex,Analog,SEQ_RefractiveIndex,2.3,2.3,2.25061,1.487327,2.25061,1.487327,2.25061,1.487327,2.25061,1.487327,2.25061,1.487327,2.25061,1.487327,2.25061,1.487327,2.25061,1.487327
+SEQ_SettlingTime,Analog,SEQ_SettlingTime,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0
+SEQ_GSA,Analog,SEQ_GSA,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2
+SEQ_TriggerFunction,Analog,SEQ_TriggerFunction,3,3,1,1,3,1,3,3,3,3,3,3,3,3,3,3,3,3
+SEQ_Slits,Analog,SEQ_Slits,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5,0.5
+SEQ_Rate,Analog,SEQ_Rate,0.5,0.5,0.61,0.51,0.61,0.51,0.61,0.51,0.61,0.51,0.61,0.51,0.61,0.51,0.61,0.51,0.61,0.51
+SEQ_RateReference,Analog,SEQ_RateReference,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1

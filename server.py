@@ -18,6 +18,8 @@ Routes:
     GET    /recipeeditor/api/layer-names     → List step names from Layer.CSV
     GET    /recipeeditor/api/import-settings → Load material→step mapping
     POST   /recipeeditor/api/import-settings → Save material→step mapping
+    GET    /api/version                       → Max mtime across all frontend files
+    GET    /recipeeditor/api/import-log      → Full log, or filtered by ?name=
     PATCH  /recipeeditor/api/recipe     → Rename a recipe (?name=, body: new_name)
     DELETE /recipeeditor/api/recipe     → Delete a recipe (?name=)
 
@@ -163,8 +165,14 @@ IMPORT_SETTINGS      = BASE / "RecipeEditor" / "import_settings.json"
 BACKUP_MAX_AGE_DAYS  = 30
 
 
+def _recipe_editor_dir() -> Path:
+    return _get_recipe_dir() / "recipe-editor"
+
 def _backup_dir() -> Path:
-    return _get_recipe_dir() / "recipe-editor-backups"
+    return _recipe_editor_dir() / "backups"
+
+def _import_log_path() -> Path:
+    return _recipe_editor_dir() / "import_log.json"
 
 # Serialize all recipe-file writes. HTTPServer is single-threaded today, but
 # this also protects against re-entrant calls from shared helpers.
@@ -181,7 +189,7 @@ def _timestamped_backup(path: Path) -> None:
     if not path.exists():
         return
     bd = _backup_dir()
-    bd.mkdir(exist_ok=True)
+    bd.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     shutil.copy2(str(path), bd / f"{path.name}.{stamp}.bak")
     _prune_backups()
@@ -221,6 +229,28 @@ def _import_settings_save(data: dict):
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
     os.replace(tmp, str(IMPORT_SETTINGS))
+
+
+def _import_log_append(lpr_name: str, recipe_name: str, lpr_filename: str | None, steps: int):
+    """Append one record to the import log. Loads, appends, and atomically replaces."""
+    log_path = _import_log_path()
+    log_path.parent.mkdir(exist_ok=True)
+    records = []
+    if log_path.exists():
+        with open(log_path, encoding="utf-8") as f:
+            records = json.load(f)
+    records.append({
+        "imported_at":     datetime.now().isoformat(timespec="seconds"),
+        "lpr_name":        lpr_name,
+        "recipe_name":     recipe_name,
+        "name_overridden": lpr_name != recipe_name,
+        "lpr_filename":    lpr_filename,
+        "steps":           steps,
+    })
+    tmp = str(log_path) + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(records, f, indent=2)
+    os.replace(tmp, str(log_path))
 
 
 def _validate_import_settings(data: dict) -> str | None:
@@ -333,13 +363,14 @@ def _seq_data(seq_name: str) -> dict:
     return {"params": visible_params, "load": load_values, "steps": steps}
 
 
-def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
+def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None, lpr_filename: str | None = None) -> dict:
     """Parse an LPR (XML) file and create a new SEQ_*.CSV + add a RECIPE.csv column."""
     tree = ET.parse(io.BytesIO(lpr_bytes))
     root = tree.getroot()
 
     # Process name from root attribute; recipe_name overrides
-    proc_name = (recipe_name or root.get("name", "")).strip()
+    lpr_name  = root.get("name", "").strip()
+    proc_name = (recipe_name or lpr_name).strip()
     if not proc_name:
         return {"error": "Could not determine recipe name"}
 
@@ -540,6 +571,8 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
             csv.writer(f).writerows(new_recipe_rows)
         os.replace(tmp, str(recipe_csv))
 
+    _import_log_append(lpr_name, proc_name, lpr_filename, total_steps)
+
     return {
         "ok":         True,
         "name":       proc_name,
@@ -674,7 +707,7 @@ def _recipe_delete(seq_name: str) -> dict:
         # Move deleted SEQ file into the backup dir so the recipe folder stays clean
         if seq_path.exists():
             bd = _backup_dir()
-            bd.mkdir(exist_ok=True)
+            bd.mkdir(parents=True, exist_ok=True)
             stamp = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
             shutil.move(str(seq_path), bd / f"{seq_path.name}.{stamp}.deleted")
 
@@ -735,6 +768,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
         elif path == "/recipeeditor/api/import-settings":
             self._send_json(_import_settings_load())
+
+        elif path == "/api/version":
+            watched = [
+                BASE / "index.html",
+                BASE / "RecipeEditor" / "index.html",
+                BASE / "RecipeEditor" / "app.js",
+                BASE / "RecipeEditor" / "app.css",
+                BASE / "OptilayerIndexer" / "index.html",
+                BASE / "OptilayerIndexer" / "app.js",
+                BASE / "OptilayerIndexer" / "app.css",
+            ]
+            mtime = max(f.stat().st_mtime for f in watched if f.exists())
+            label = "v " + datetime.fromtimestamp(mtime).strftime("%-d %b %Y %H:%M")
+            self._send_json({"mtime": mtime, "label": label})
+
+        elif path == "/recipeeditor/api/import-log":
+            qs   = urllib.parse.parse_qs(parsed.query)
+            name = qs.get("name", [""])[0].strip()
+            log_path = _import_log_path()
+            if not log_path.exists():
+                self._send_json({"error": "No import log found"}, 404)
+            else:
+                with open(log_path, encoding="utf-8") as f:
+                    records = json.load(f)
+                if name:
+                    records = [r for r in records if r.get("recipe_name") == name]
+                    if not records:
+                        self._send_json({"error": f"No import log entry for recipe '{name}'"}, 404)
+                        return
+                self._send_json(records)
 
         else:
             self.send_error(404)
@@ -822,9 +885,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             lpr_bytes = self.rfile.read(length)
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-            recipe_name = qs.get("name", [""])[0].strip() or None
+            recipe_name  = qs.get("name",     [""])[0].strip() or None
+            lpr_filename = qs.get("filename", [""])[0].strip() or None
             try:
-                result = _lpr_import(lpr_bytes, recipe_name)
+                result = _lpr_import(lpr_bytes, recipe_name, lpr_filename)
                 self._send_json(result, 200 if result.get("ok") else 400)
             except Exception as e:
                 traceback.print_exc()
