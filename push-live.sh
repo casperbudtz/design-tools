@@ -12,7 +12,8 @@ if [ ! -d "$LIVE_DIR" ]; then
   exit 1
 fi
 
-git -C "$LIVE_DIR" merge master --ff-only
+git -C "$LIVE_DIR" fetch origin master
+git -C "$LIVE_DIR" reset --hard origin/master
 HASH=$(git -C "$LIVE_DIR" rev-parse --short HEAD)
 
 sudo systemctl restart "$SERVICE"
