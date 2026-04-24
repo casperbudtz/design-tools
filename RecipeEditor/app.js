@@ -220,11 +220,30 @@ function updateStep(idx, param, value, el) {
     el.dataset.val = value;
   }
 
-  // Enable/disable Rounds input when Type changes
+  // Enable/disable Rounds input when Type changes; auto-calculate if switching to RNDS and rounds=0
   if (param === "SEQ_StepType" && el) {
     const row = el.closest("tr");
     const roundsInput = row?.querySelector(".rounds-input");
-    if (roundsInput) roundsInput.disabled = value !== "2";
+    if (roundsInput) {
+      const isRnds = value === "2";
+      roundsInput.disabled = !isRnds;
+      if (!isRnds) {
+        roundsInput.value = 0;
+        step.values["SEQ_Rounds"] = "0";
+      } else {
+        const v = step.values;
+        const n    = parseFloat(v["SEQ_RefractiveIndex"]);
+        const qwot = parseFloat(v["SEQ_QWOT"]);
+        const wl   = parseFloat(v["SEQ_Wavelength"]);
+        const rate = parseFloat(v["SEQ_Rate"]);
+        if (n > 0 && qwot > 0 && wl > 0 && rate > 0) {
+          const thickness = (qwot * wl) / (4 * n);
+          const rounds = Math.round((thickness / rate) * 3);
+          roundsInput.value = rounds;
+          step.values["SEQ_Rounds"] = String(rounds);
+        }
+      }
+    }
   }
 }
 

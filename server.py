@@ -466,10 +466,12 @@ def _lpr_import(lpr_bytes: bytes, recipe_name: str | None = None) -> dict:
             wl  = float(d.get("wavelength", "0") or "0")
             rc_raw = o.get("RateContol", "0")
             rc_val = "1" if tc == "OMS" else rc_raw
-            rounds = int(o.get("Rounds", "0") or "0")
-            max_time = str(round(rounds * 2 / 3)) if tc == "OMS" else "0"
+            rounds_raw = int(o.get("Rounds", "0") or "0")
+            max_time = str(round(rounds_raw * 2 / 3)) if tc == "OMS" else "0"
             trig_raw = o.get("TriggerPointFkt", "OFFSET")
             trigger = trigger_map.get(trig_raw, "1")
+
+            rounds = rounds_raw if step_type == "2" else 0
 
             v = {
                 "SEQ_Enable":          "1",
