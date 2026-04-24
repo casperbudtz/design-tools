@@ -191,6 +191,9 @@ function renderCell(param, value, idx, step) {
                   min="0" step="1" ${disabled}
                   onchange="updateStep(${idx},'${param}',this.value)"></td>`;
   }
+  if (param === "SEQ_MaxTime") {
+    return `<td class="maxtime-cell ${cellClass(param, value)}">${esc(value) || '<span class="cell-dash">—</span>'}</td>`;
+  }
   const cls = cellClass(param, value);
   return `<td class="${cls}">${esc(value) || '<span class="cell-dash">—</span>'}</td>`;
 }
@@ -223,6 +226,7 @@ function updateStep(idx, param, value, el) {
   // Enable/disable Rounds input when Type changes; auto-calculate if switching to RNDS and rounds=0
   if (param === "SEQ_StepType" && el) {
     const row = el.closest("tr");
+
     const roundsInput = row?.querySelector(".rounds-input");
     if (roundsInput) {
       const isRnds = value === "2";
@@ -243,6 +247,26 @@ function updateStep(idx, param, value, el) {
           step.values["SEQ_Rounds"] = String(rounds);
         }
       }
+    }
+
+    const isOms = value === "3";
+    let maxTime = 0;
+    if (isOms) {
+      const v = step.values;
+      const n    = parseFloat(v["SEQ_RefractiveIndex"]);
+      const qwot = parseFloat(v["SEQ_QWOT"]);
+      const wl   = parseFloat(v["SEQ_Wavelength"]);
+      const rate = parseFloat(v["SEQ_Rate"]);
+      if (n > 0 && qwot > 0 && wl > 0 && rate > 0) {
+        const thickness = (qwot * wl) / (4 * n);
+        maxTime = Math.round((thickness / rate) * 2);
+      }
+    }
+    step.values["SEQ_MaxTime"] = String(maxTime);
+    const maxTimeCell = row?.querySelector(".maxtime-cell");
+    if (maxTimeCell) {
+      maxTimeCell.textContent = String(maxTime);
+      maxTimeCell.className = "maxtime-cell" + (maxTime === 0 ? " cell-zero" : "");
     }
   }
 }
