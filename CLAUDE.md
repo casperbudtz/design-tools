@@ -4,10 +4,10 @@ This file provides guidance to Claude Code when working in the `DesignTools` rep
 
 ## Workspace Structure
 
-- `server.py` — Web server (port 8081). Serves the Design Tools landing page and routes sub-project requests.
+- `server.py` — Web server (port 8081). Defines a `ROUTES` table mapping `(method, path) → handler(h, parsed)`. Pure routing; all business logic lives in the per-module files below.
 - `index.html` — Design Tools landing page. Two cards: Optilayer Indexer and Recipe Editor.
-- `RecipeEditor/` — Viewer and editor for deposition machine recipe files. Reads `RecipeEditor/recipe/RECIPE.csv` and the corresponding `SEQ_<name>.CSV` sequence files. See `RecipeEditor/README.md` for full details.
-- `OptilayerIndexer/` — Search index for OptiLayer multilayer film designs. Parses `DESIGNA.DBS` binary index files. Incremental: caches mtime and skips unchanged folders. Index stored in `OptilayerIndexer/index.json`.
+- `RecipeEditor/recipe_logic.py` — **library module** loaded by `server.py` via importlib. Surface: `recipe_list`, `seq_data`, `seq_save`, `lpr_import`, `recipe_rename`, `recipe_delete`, `layer_names`, `settings_load`, `settings_save`, `validate_settings`, `import_log_path`. Reads/writes `RecipeEditor/recipe/RECIPE.csv` and `SEQ_<name>.CSV`. See `RecipeEditor/README.md` for the file format details.
+- `OptilayerIndexer/indexer.py` — **library module** loaded by `server.py` via importlib. Surface: `load_index`, `build_index(optilayer_dir)`. Parses `DESIGNA.DBS` binary index files; incremental, caches per-folder mtime. Index stored in `OptilayerIndexer/index.json`.
 - `design-tools.service` — systemd service file template (contains `<target-user>` placeholders to fill in on the target machine).
 - `restart-server.sh` — Kills the running server on port 8081 and restarts it (logs to `/tmp/design-tools.log`).
 
@@ -53,9 +53,9 @@ Parses `DESIGNA.DBS` binary index files (one per OptiLayer project folder). The 
 
 The `OPTILAYER_DIR` path is configurable via environment variable (see above). The default value in `server.py` is a KIO FUSE mount path specific to the development machine — **this must be updated on the target machine**.
 
-`OptilayerIndexer/indexer.py` is a standalone script that mirrors the same parsing logic and can be run manually or via cron:
+The cron entry rebuilds the index by hitting the HTTP endpoint:
 ```bash
-python3 OptilayerIndexer/indexer.py
+curl -s -X POST http://localhost:8081/optilayer/api/update
 ```
 
 ### Recipe Editor

@@ -1,6 +1,6 @@
 # Recipe Editor
 
-Web-based viewer and editor for deposition machine recipe files. Served at `/recipeeditor/` by the Command Central server.
+Web-based viewer and editor for deposition machine recipe files. Served at `/recipeeditor/` by the Design Tools server.
 
 ## File layout
 

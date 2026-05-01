@@ -3,4 +3,5 @@ __pycache__/
 *.log
 RecipeEditor/recipe/
 RecipeEditor/.~lock.*
+RecipeEditor/import_settings.json
 OptilayerIndexer/index.json
